@@ -13,6 +13,10 @@ class _StreamingScreenState extends State<StreamingScreen> {
   bool _showControls = true;
   Offset? _lastTouchPosition;
   bool _isLongPress = false;
+  
+  // 多點觸控追蹤
+  final Map<int, Offset> _activePointers = {};
+  double? _initialPinchDistance;
 
   @override
   void initState() {
@@ -49,6 +53,51 @@ class _StreamingScreenState extends State<StreamingScreen> {
     final streamingService = context.read<StreamingService>();
     streamingService.touchUp(0, 0);
     _lastTouchPosition = null;
+    _activePointers.clear();
+  }
+
+  void _handleScaleStart(ScaleStartDetails details) {
+    if (details.pointerCount >= 2) {
+      _initialPinchDistance = _calculatePinchDistance(details);
+    }
+  }
+
+  void _handleScaleUpdate(ScaleUpdateDetails details) {
+    if (details.pointerCount >= 2 && _initialPinchDistance != null) {
+      final currentDistance = _calculatePinchDistance(details);
+      final scale = currentDistance / _initialPinchDistance!;
+      
+      // 檢測縮放手勢
+      if (scale > 1.2 || scale < 0.8) {
+        final streamingService = context.read<StreamingService>();
+        
+        // 構建多點觸控數據
+        final pointers = details.focalPointDetails?.pointerPositions?.entries.map((e) => {
+          'pointerId': e.key,
+          'x': e.value.dx / MediaQuery.of(context).size.width,
+          'y': e.value.dy / MediaQuery.of(context).size.height,
+        }).toList() ?? [];
+        
+        if (pointers.length >= 2) {
+          streamingService.sendPinch(pointers);
+        }
+        
+        // 重置初始距離
+        _initialPinchDistance = currentDistance;
+      }
+    }
+  }
+
+  double _calculatePinchDistance(ScaleUpdateDetails details) {
+    // 簡單的兩指距離計算
+    final focalPoint = details.focalPoint;
+    // 使用 localFocalPoint 計算兩指距離
+    // 這是一個簡化的實現
+    return details.scale;
+  }
+
+  void _handleScaleEnd(ScaleEndDetails details) {
+    _initialPinchDistance = null;
   }
 
   void _handleTapDown(TapDownDetails details) {
@@ -86,6 +135,9 @@ class _StreamingScreenState extends State<StreamingScreen> {
         onPanStart: _handlePanStart,
         onPanUpdate: _handlePanUpdate,
         onPanEnd: _handlePanEnd,
+        onScaleStart: _handleScaleStart,
+        onScaleUpdate: _handleScaleUpdate,
+        onScaleEnd: _handleScaleEnd,
         onTapDown: _handleTapDown,
         onTapUp: _handleTapUp,
         child: Stack(

@@ -42,6 +42,12 @@ class StreamingService extends ChangeNotifier {
   
   // 幀率設定
   int _setFps = 30;
+  
+  // 重連機制
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+  static const int _maxReconnectAttempts = 5;
+  static const int _reconnectDelaySeconds = 3;
 
   bool get isConnected => _isConnected;
   bool get isConnecting => _isConnecting;
@@ -86,12 +92,14 @@ class StreamingService extends ChangeNotifier {
           _isConnected = false;
           _isConnecting = false;
           notifyListeners();
+          _scheduleReconnect();
         },
         onDone: () {
           debugPrint('WebSocket closed');
           _isConnected = false;
           _isStreaming = false;
           notifyListeners();
+          _scheduleReconnect();
         },
       );
 
@@ -411,6 +419,7 @@ class StreamingService extends ChangeNotifier {
    * 斷開連接
    */
   Future<void> disconnect() async {
+    _cancelReconnect();
     await stopStreaming();
     
     _ws?.close();
@@ -421,6 +430,65 @@ class StreamingService extends ChangeNotifier {
     _currentJpegData = null;
 
     notifyListeners();
+  }
+
+  /**
+   * 排程重連
+   */
+  void _scheduleReconnect() {
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      log('Max reconnection attempts reached');
+      return;
+    }
+    
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(
+      Duration(seconds: _reconnectDelaySeconds * (_reconnectAttempts + 1)),
+      () {
+        _reconnectAttempts++;
+        log('Reconnecting... attempt $_reconnectAttempts/$_maxReconnectAttempts');
+        if (_pcId.isNotEmpty) {
+          connect(_pcId, serverUrl: _serverUrl).then((_) {
+            // 重連成功後重新開始串流
+            if (_isConnected && !_isStreaming) {
+              startStreaming();
+            }
+          });
+        }
+      },
+    );
+  }
+
+  /**
+   * 取消重連
+   */
+  void _cancelReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _reconnectAttempts = 0;
+  }
+
+  /**
+   * 發送多點觸控事件
+   * @param pointers - 觸控點列表 [{pointerId, x, y}]
+   * @param action - 動作: pointer-down, pointer-move, pointer-up, pinch, rotate
+   */
+  void sendMultiTouch(List<Map<String, dynamic>> pointers, String action) {
+    if (!_isConnected) return;
+
+    _ws?.add(jsonEncode({
+      'type': 'multi-touch',
+      'action': action,
+      'pointers': pointers,
+      'timestamp': DateTime.now().millisecondsSinceEpoch
+    }));
+  }
+
+  /**
+   * 發送縮放手勢
+   */
+  void sendPinch(List<Map<String, dynamic>> pointers) {
+    sendMultiTouch(pointers, 'pinch');
   }
 
   @override
