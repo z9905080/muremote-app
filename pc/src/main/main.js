@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const log = require('electron-log');
 const Streamer = require('./streamer');
 const TouchHandler = require('./touch_handler');
+const MultiTouchHandler = require('./multi_touch_handler');
 const MdnsAdvertiser = require('./mdns_advertiser');
 const config = require('../config');
 
@@ -18,6 +19,7 @@ let adbClient = null;
 let wsServer = null;
 let streamer = null;
 let touchHandler = null;
+let multiTouchHandler = null;
 let mdnsAdvertiser = null;
 let connectedClients = new Map();
 let pcId = uuidv4().substring(0, 8).toUpperCase();
@@ -98,6 +100,7 @@ async function connectADB() {
       // 初始化 Streamer 和 TouchHandler
       streamer = new Streamer(adbClient, device.id);
       touchHandler = new TouchHandler(adbClient, device.id);
+      multiTouchHandler = new MultiTouchHandler(touchHandler);
       
       // 獲取螢幕大小
       await touchHandler.updateScreenSize();
@@ -164,6 +167,13 @@ async function handleClientMessage(clientId, ws, data) {
       // 觸控事件
       if (touchHandler) {
         await touchHandler.handleTouch(data);
+      }
+      break;
+
+    case 'multi-touch':
+      // 多點觸控事件
+      if (multiTouchHandler) {
+        await multiTouchHandler.handleMultiTouch(data);
       }
       break;
 
