@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
@@ -16,11 +17,19 @@ class StreamingService extends ChangeNotifier {
   bool _isConnecting = false;
   bool _isStreaming = false;
   int _latency = 0;
-  int _fps = 30;
+  int _fps = 0;
   String _resolution = '720p';
   String _pcId = '';
   int _screenWidth = 1080;
   int _screenHeight = 1920;
+  
+  // 影片幀緩衝
+  ui.Image? _currentFrame;
+  final List<Uint8List> _frameBuffer = [];
+  bool _isDecoding = false;
+  
+  // 當前幀圖片 (用於顯示)
+  Uint8List? _currentJpegData;
 
   // Server URL - 應該從設定中獲取
   String _serverUrl = 'ws://192.168.1.100:8080';
@@ -31,7 +40,9 @@ class StreamingService extends ChangeNotifier {
   int get latency => _latency;
   int get fps => _fps;
   String get resolution => _resolution;
-  RTCVideoRenderer? get remoteRenderer => _remoteRenderer;
+  Uint8List? get currentFrame => _currentJpegData;
+  int get screenWidth => _screenWidth;
+  int get screenHeight => _screenHeight;
 
   StreamingService() {
     _initRenderer();
@@ -112,6 +123,9 @@ class StreamingService extends ChangeNotifier {
             _screenHeight = data['height'] ?? 1920;
             notifyListeners();
             break;
+          case 'error':
+            debugPrint('Server error: ${data['message']}');
+            break;
         }
       } catch (e) {
         debugPrint('JSON parse error: $e');
@@ -126,12 +140,48 @@ class StreamingService extends ChangeNotifier {
    * 處理影片幀
    */
   void _handleVideoFrame(Uint8List data) {
-    // 簡單的 JPEG 檢測
-    if (data.length > 4 && data[0] == 0xFF && data[1] == 0xD8) {
-      // 這是 JPEG 數據
-      // 在實際應用中，這裡應該解碼並顯示
-      // 目前先用占位符
+    // 檢查幀類型
+    if (data.isEmpty) return;
+    
+    final frameType = data[0];
+    
+    if (frameType == 0x01) {
+      // JPEG 幀
+      final jpegData = data.sublist(1);
+      _displayJpegFrame(jpegData);
+    } else if (data.length > 4) {
+      // 可能是長度前綴的幀
+      // 嘗試解析長度
+      try {
+        final length = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+        if (data.length >= length + 4) {
+          final frameData = data.sublist(4, 4 + length);
+          _displayJpegFrame(frameData);
+        }
+      } catch (e) {
+        // 嘗試作為原始 JPEG 處理
+        _displayJpegFrame(data);
+      }
     }
+  }
+
+  /**
+   * 顯示 JPEG 幀
+   */
+  void _displayJpegFrame(Uint8List jpegData) {
+    // 簡單檢查 JPEG 魔數
+    if (jpegData.length < 2 || jpegData[0] != 0xFF || jpegData[1] != 0xD8) {
+      // 嘗試尋找 JPEG 開始標記
+      for (int i = 0; i < jpegData.length - 1; i++) {
+        if (jpegData[i] == 0xFF && jpegData[i+1] == 0xD8) {
+          jpegData = jpegData.sublist(i);
+          break;
+        }
+      }
+    }
+    
+    _currentJpegData = jpegData;
+    notifyListeners();
   }
 
   /**
@@ -164,11 +214,14 @@ class StreamingService extends ChangeNotifier {
     }));
 
     _isStreaming = false;
+    _currentJpegData = null;
     notifyListeners();
   }
 
   /**
    * 發送觸控事件
+   * @param x, y 歸一化座標 (0-1)
+   * @param action 動作: tap, down, move, up
    */
   void sendTouch(double x, double y, String action) {
     if (!_isConnected) return;
@@ -178,7 +231,8 @@ class StreamingService extends ChangeNotifier {
       'type': 'touch',
       'action': action,
       'x': x,
-      'y': y
+      'y': y,
+      'timestamp': DateTime.now().millisecondsSinceEpoch
     }));
   }
 
@@ -187,6 +241,27 @@ class StreamingService extends ChangeNotifier {
    */
   void tap(double x, double y) {
     sendTouch(x, y, 'tap');
+  }
+
+  /**
+   * 按下
+   */
+  void touchDown(double x, double y) {
+    sendTouch(x, y, 'down');
+  }
+
+  /**
+   * 移動
+   */
+  void touchMove(double x, double y) {
+    sendTouch(x, y, 'move');
+  }
+
+  /**
+   * 鬆開
+   */
+  void touchUp(double x, double y) {
+    sendTouch(x, y, 'up');
   }
 
   /**
@@ -231,6 +306,41 @@ class StreamingService extends ChangeNotifier {
   }
 
   /**
+   * 請求截圖
+   */
+  Future<Uint8List?> requestScreenshot() async {
+    if (!_isConnected) return null;
+
+    final completer = Completer<Uint8List?>();
+    
+    // 設置一次性監聽器
+    void handleMessage(dynamic message) {
+      if (message is List<int>) {
+        final data = Uint8List.fromList(message);
+        if (data.length > 2 && data[0] == 0xFF && data[1] == 0xD8) {
+          _ws?.removeListener(handleMessage);
+          completer.complete(data);
+        }
+      }
+    }
+    
+    _ws?.addListener(handleMessage);
+    
+    _ws?.add(jsonEncode({
+      'type': 'screenshot'
+    }));
+
+    // 5秒超時
+    return completer.future.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () {
+        _ws?.removeListener(handleMessage);
+        return null;
+      }
+    );
+  }
+
+  /**
    * 斷開連接
    */
   Future<void> disconnect() async {
@@ -241,6 +351,7 @@ class StreamingService extends ChangeNotifier {
     _isConnected = false;
     _isConnecting = false;
     _pcId = '';
+    _currentJpegData = null;
 
     notifyListeners();
   }

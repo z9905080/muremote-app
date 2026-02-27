@@ -10,7 +10,9 @@ class StreamingScreen extends StatefulWidget {
 }
 
 class _StreamingScreenState extends State<StreamingScreen> {
-  bool _showControls = false;
+  bool _showControls = true;
+  Offset? _lastTouchPosition;
+  bool _isLongPress = false;
 
   @override
   void initState() {
@@ -19,6 +21,54 @@ class _StreamingScreenState extends State<StreamingScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<StreamingService>().startStreaming();
     });
+  }
+
+  void _handlePanStart(DragStartDetails details) {
+    _lastTouchPosition = details.localPosition;
+    final streamingService = context.read<StreamingService>();
+    
+    // 計算觸控位置 (0-1 範圍)
+    final x = details.localPosition.dx / MediaQuery.of(context).size.width;
+    final y = details.localPosition.dy / MediaQuery.of(context).size.height;
+    
+    streamingService.touchDown(x, y);
+  }
+
+  void _handlePanUpdate(DragUpdateDetails details) {
+    final streamingService = context.read<StreamingService>();
+    
+    // 計算觸控位置 (0-1 範圍)
+    final x = details.localPosition.dx / MediaQuery.of(context).size.width;
+    final y = details.localPosition.dy / MediaQuery.of(context).size.height;
+    
+    streamingService.touchMove(x, y);
+    _lastTouchPosition = details.localPosition;
+  }
+
+  void _handlePanEnd(DragEndDetails details) {
+    final streamingService = context.read<StreamingService>();
+    streamingService.touchUp(0, 0);
+    _lastTouchPosition = null;
+  }
+
+  void _handleTapDown(TapDownDetails details) {
+    final streamingService = context.read<StreamingService>();
+    
+    // 計算觸控位置 (0-1 範圍)
+    final x = details.localPosition.dx / MediaQuery.of(context).size.width;
+    final y = details.localPosition.dy / MediaQuery.of(context).size.height;
+    
+    streamingService.touchDown(x, y);
+  }
+
+  void _handleTapUp(TapUpDetails details) {
+    final streamingService = context.read<StreamingService>();
+    
+    // 計算觸控位置 (0-1 範圍)
+    final x = details.localPosition.dx / MediaQuery.of(context).size.width;
+    final y = details.localPosition.dy / MediaQuery.of(context).size.height;
+    
+    streamingService.tap(x, y);
   }
 
   @override
@@ -33,49 +83,45 @@ class _StreamingScreenState extends State<StreamingScreen> {
             _showControls = !_showControls;
           });
         },
-        onPanStart: (details) {
-          // 記錄起始位置
-        },
-        onPanUpdate: (details) {
-          // 計算觸控位置 (0-1 範圍)
-          final x = details.localPosition.dx / MediaQuery.of(context).size.width;
-          final y = details.localPosition.dy / MediaQuery.of(context).size.height;
-          
-          streamingService.sendTouch(x, y, 'move');
-        },
-        onPanEnd: (details) {
-          streamingService.sendTouch(0, 0, 'up');
-        },
-        onTapDown: (details) {
-          final x = details.localPosition.dx / MediaQuery.of(context).size.width;
-          final y = details.localPosition.dy / MediaQuery.of(context).size.height;
-          
-          streamingService.sendTouch(x, y, 'down');
-        },
-        onTapUp: (details) {
-          final x = details.localPosition.dx / MediaQuery.of(context).size.width;
-          final y = details.localPosition.dy / MediaQuery.of(context).size.height;
-          
-          streamingService.tap(x, y);
-        },
+        onPanStart: _handlePanStart,
+        onPanUpdate: _handlePanUpdate,
+        onPanEnd: _handlePanEnd,
+        onTapDown: _handleTapDown,
+        onTapUp: _handleTapUp,
         child: Stack(
           children: [
-            // 遠端畫面
+            // 遠端畫面 - 使用 JPEG 幀顯示
             Center(
-              child: streamingService.remoteRenderer != null
-                ? RTCVideoView(streamingService.remoteRenderer!)
+              child: streamingService.currentFrame != null
+                ? Image.memory(
+                    streamingService.currentFrame!,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true, // 流暢播放
+                  )
                 : Container(
                     color: Colors.grey[900],
-                    child: const Center(
+                    child: Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          CircularProgressIndicator(color: Colors.white),
-                          SizedBox(height: 16),
+                          const CircularProgressIndicator(color: Colors.white),
+                          const SizedBox(height: 16),
                           Text(
-                            '等待串流連線...',
-                            style: TextStyle(color: Colors.white),
+                            streamingService.isStreaming 
+                              ? '等待畫面...' 
+                              : '正在連線...',
+                            style: const TextStyle(color: Colors.white),
                           ),
+                          if (streamingService.isStreaming) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              '延遲: ${streamingService.latency}ms | FPS: ${streamingService.fps}',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.7),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -128,13 +174,28 @@ class _StreamingScreenState extends State<StreamingScreen> {
                             : Colors.orange,
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: Text(
-                          streamingService.isStreaming ? 'LIVE' : '連線中',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (streamingService.isStreaming)
+                              Container(
+                                width: 8,
+                                height: 8,
+                                margin: const EdgeInsets.only(right: 6),
+                                decoration: const BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            Text(
+                              streamingService.isStreaming ? 'LIVE' : '連線中',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -187,16 +248,22 @@ class _StreamingScreenState extends State<StreamingScreen> {
                         label: '重新整理',
                         onTap: () => streamingService.sendKey('enter'),
                       ),
+                      _buildQuickButton(
+                        icon: Icons.keyboard,
+                        label: '輸入',
+                        onTap: () => _showKeyboardDialog(context, streamingService),
+                      ),
                     ],
                   ),
                 ),
               ),
 
-              // 右側 - 畫質/設定
+              // 右側 - 狀態資訊
               Positioned(
                 right: 16,
-                top: MediaQuery.of(context).size.height * 0.3,
+                top: MediaQuery.of(context).size.height * 0.25,
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     _buildSideButton(
                       icon: Icons.high_quality,
@@ -218,6 +285,39 @@ class _StreamingScreenState extends State<StreamingScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  void _showKeyboardDialog(BuildContext context, StreamingService service) {
+    final controller = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('輸入文字'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: '輸入要發送的文字',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              if (controller.text.isNotEmpty) {
+                service.sendText(controller.text);
+              }
+              Navigator.pop(context);
+            },
+            child: const Text('發送'),
+          ),
+        ],
       ),
     );
   }
