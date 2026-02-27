@@ -9,6 +9,7 @@ const TouchHandler = require('./touch_handler');
 const MultiTouchHandler = require('./multi_touch_handler');
 const MdnsAdvertiser = require('./mdns_advertiser');
 const DeviceManager = require('./device_manager');
+const ReconnectionManager = require('./reconnection_manager');
 const config = require('../config');
 
 log.transports.file.level = 'info';
@@ -23,6 +24,7 @@ let touchHandler = null;
 let multiTouchHandler = null;
 let mdnsAdvertiser = null;
 let deviceManager = null;
+let reconnectionManager = null;
 let connectedClients = new Map();
 let pcId = uuidv4().substring(0, 8).toUpperCase();
 
@@ -125,6 +127,100 @@ async function connectADB() {
   } catch (error) {
     log.error('ADB connection error:', error);
     return false;
+  }
+}
+
+/**
+ * 初始化重連管理器
+ */
+function initReconnectionManager() {
+  reconnectionManager = new ReconnectionManager();
+  
+  // 設置重連回調 - 嘗試重新連接 ADB 設備
+  reconnectionManager.setReconnectCallback(async () => {
+    log.info('Attempting to reconnect ADB...');
+    try {
+      const success = await connectADB();
+      if (success) {
+        log.info('ADB reconnection successful');
+        // 通知所有客戶端重新連接
+        broadcastToClients({
+          type: 'reconnected',
+          message: 'Server reconnected to emulator'
+        });
+        return true;
+      }
+    } catch (e) {
+      log.error('Reconnection failed:', e);
+    }
+    return false;
+  });
+  
+  // 設置重連參數
+  reconnectionManager.setMaxAttempts(10);
+  reconnectionManager.setDelays(2000, 60000); // 2秒基礎，最大60秒
+  
+  log.info('Reconnection manager initialized');
+}
+
+/**
+ * 檢查設備連接狀態
+ */
+let deviceCheckInterval = null;
+
+async function checkDeviceConnection() {
+  if (!deviceManager) return;
+  
+  try {
+    await deviceManager.refreshDevices();
+    
+    if (!deviceManager.primaryDevice || deviceManager.devices.length === 0) {
+      log.warn('Device disconnected, starting reconnection...');
+      
+      if (reconnectionManager && !reconnectionManager.isReconnecting) {
+        reconnectionManager.startReconnect();
+        
+        // 通知客戶端
+        broadcastToClients({
+          type: 'connection_lost',
+          message: 'Lost connection to emulator, attempting to reconnect...',
+          reconnecting: true
+        });
+      }
+    }
+  } catch (e) {
+    log.error('Device check error:', e);
+  }
+}
+
+/**
+ * 啟動設備監控
+ */
+function startDeviceMonitoring() {
+  // 每10秒檢查一次設備連接狀態
+  deviceCheckInterval = setInterval(checkDeviceConnection, 10000);
+  log.info('Device monitoring started');
+}
+
+/**
+ * 停止設備監控
+ */
+function stopDeviceMonitoring() {
+  if (deviceCheckInterval) {
+    clearInterval(deviceCheckInterval);
+    deviceCheckInterval = null;
+  }
+}
+
+/**
+ * 廣播消息到所有客戶端
+ */
+function broadcastToClients(data) {
+  const message = JSON.stringify(data);
+  for (const [clientId, client] of connectedClients) {
+    if (client.ws && client.ws.readyState === 1) {
+      client.ws.send(message);
+    }
   }
 }
 
@@ -353,6 +449,8 @@ app.whenReady().then(async () => {
   createTray();
   
   await connectADB();
+  initReconnectionManager();
+  startDeviceMonitoring();
   startWebSocketServer();
 
   // 啟動 mDNS 服務發現
@@ -378,6 +476,8 @@ app.on('before-quit', () => {
   if (streamer) streamer.stopStream();
   if (wsServer) wsServer.close();
   if (mdnsAdvertiser) mdnsAdvertiser.stop();
+  if (reconnectionManager) reconnectionManager.stopReconnect();
+  stopDeviceMonitoring();
   log.info('MuRemote PC Client shutting down');
 });
 
