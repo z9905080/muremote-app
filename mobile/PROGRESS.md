@@ -1,5 +1,25 @@
 # MuRemote 開發進度
 
+## 第十二次回報 - 22:34 (台北時間 CST)
+
+### 當前時間
+- **台北時間**: 2026-02-27 22:34:00 CST (UTC+8)
+- **網路時間**: 已同步 ✅
+
+---
+
+### 這段時間完成
+
+#### Bug 修復
+- [x] streamer.js - 修復 `requestScreenshot` 函數中 `reject` 未定義的問題
+- [x] streaming_service.dart - 修復截圖幀處理邏輯，正確識別幀類型 0x02
+
+#### 功能優化
+- [x] streaming_service.dart - 簡化截圖請求流程，使用 Completer 替代複雜的監聽器
+- [x] 改善截圖功能穩定性
+
+---
+
 ## 第十一次回報 - 22:18 (台北時間 CST)
 
 ### 當前時間
