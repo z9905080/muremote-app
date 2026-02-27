@@ -17,20 +17,24 @@ class Streamer {
     this.ffmpegProcess = null;
     this.clients = new Set();
     
-    // 配置
+    // 配置 - 預設為低延遲優化
     this.config = {
       width: 720,
       height: 1280,
       fps: 30,
       bitrate: '2M',
-      quality: 70
+      quality: 60  // 稍微降低質量以換取更低延遲
     };
     
     this.stats = {
       fps: 0,
       latency: 0,
-      framesSent: 0
+      framesSent: 0,
+      avgLatency: 0,
+      latencySamples: []
     };
+    
+    this.frameTimestamps = new Map();
     
     this.frameCount = 0;
     this.lastFpsTime = Date.now();
@@ -91,14 +95,18 @@ class Streamer {
         '-s', this.deviceId,
         '--window-title', 'MuRemote Stream',
         '--push-target', '/sdcard/Download/',
-        '--record', 'output.mp4',
-        // 優化參數
+        // 優化參數 - 降低延遲
         '--max-fps', this.config.fps.toString(),
         '-b', this.config.bitrate,
         '--max-size', this.config.width.toString(),
         // 禁用不需要的功能以減少延遲
         '--turn-screen-off',
-        '--always-on-top'
+        '--always-on-top',
+        // 延遲優化參數
+        '--buffer-ms', '0',
+        '--no-key-repeat',
+        '--no-clipboard-autosync',
+        '--no-power-on'
       ];
 
       log.info('Starting scrcpy with args:', scrcpyArgs);
@@ -118,7 +126,7 @@ class Streamer {
       // 等待 scrcpy 啟動
       setTimeout(() => {
         resolve();
-      }, 2000);
+      }, 1000);
     });
   }
 
@@ -154,25 +162,28 @@ class Streamer {
         log.info('ADB command:', adbCommand);
 
         // 啟動 FFmpeg 進行轉碼和傳輸
-        const ffmpeg = spawn('adb', adbCommand.split(' '));
-
-        // FFmpeg 轉碼參數：H.264 -> JPEG (行動端較易處理)
-        // 但為了更低延遲，我們直接傳輸 H.264 bitstream
+        // 延遲優化: 使用更快速的編碼參數
         const ffmpegTranscode = spawn('ffmpeg', [
-          '-f', 'h264',        // 輸入格式 H.264
-          '-i', 'pipe:0',      // 從標準輸入
-          '-c:v', 'libx264',  // 重編碼
-          '-preset', 'ultrafast', // 快速編碼
+          '-fflags', 'nobuffer',        // 禁用輸入緩衝
+          '-flags', 'low_delay',        // 低延遲模式
+          '-analyzeduration', '500K',   // 減少分析時間
+          '-probesize', '500K',
+          '-f', 'h264',                 // 輸入格式 H.264
+          '-i', 'pipe:0',               // 從標準輸入
+          '-c:v', 'libx264',            // 重編碼
+          '-preset', 'ultrafast',       // 快速編碼
           '-tune', 'zerolatency',
-          '-g', '30',          // GOP size
-          '-keyint_min', '30',
-          '-bf', '0',         // 不使用 B 幀 (減少延遲)
-          '-an',              // 無音訊
-          '-c:v', 'mjpeg',    // 輸出 MJPEG (兼容性更好)
+          '-g', '15',                   // GOP size (更短的GOP)
+          '-keyint_min', '15',
+          '-sc_threshold', '0',         // 禁用場景切換檢測
+          '-bf', '0',                   // 不使用 B 幀 (減少延遲)
+          '-an',                        // 無音訊
+          '-c:v', 'mjpeg',              // 輸出 MJPEG (兼容性更好)
           '-q:v', this.config.quality.toString(),
           '-f', 'jpeg',
           '-r', this.config.fps.toString(),
-          '-'                 // 輸出到標準輸出
+          '-thread_queue_size', '64',   // 線程隊列大小優化
+          '-'                           // 輸出到標準輸出
         ]);
 
         // 處理 FFmpeg 輸出
@@ -252,11 +263,17 @@ class Streamer {
     const frame = Buffer.alloc(frameData.length + 1);
     frameData.copy(frame, 1);
     frame[0] = 0x01; // 幀類型: JPEG
+    
+    // 記錄幀發送時間
+    const frameId = Date.now() + Math.random();
+    const sendTime = Date.now();
 
     for (const client of this.clients) {
       if (client.readyState === WebSocket.OPEN) {
         try {
           client.send(frame, { binary: true });
+          // 追蹤此客戶端的幀發送時間
+          this.frameTimestamps.set(client.id || 'default', sendTime);
         } catch (e) {
           log.error('Send error:', e);
         }
@@ -279,6 +296,14 @@ class Streamer {
       this.frameCount = 0;
       this.lastFpsTime = now;
       
+      // 計算平均延遲 (如果有樣本)
+      if (this.stats.latencySamples.length > 0) {
+        const sum = this.stats.latencySamples.reduce((a, b) => a + b, 0);
+        this.stats.avgLatency = Math.round(sum / this.stats.latencySamples.length);
+        // 保持最新 10 個樣本
+        this.stats.latencySamples = this.stats.latencySamples.slice(-10);
+      }
+      
       // 廣播統計信息
       this.broadcastStats();
     }
@@ -292,6 +317,7 @@ class Streamer {
       type: 'stats',
       fps: this.stats.fps,
       latency: this.stats.latency,
+      avgLatency: this.stats.avgLatency,
       resolution: `${this.config.width}x${this.config.height}`
     };
     
@@ -315,7 +341,8 @@ class Streamer {
     this.clients.clear();
     
     // 重置統計
-    this.stats = { fps: 0, latency: 0, framesSent: 0 };
+    this.stats = { fps: 0, latency: 0, framesSent: 0, avgLatency: 0, latencySamples: [] };
+    this.frameTimestamps.clear();
     
     log.info('Streaming stopped');
   }
@@ -356,7 +383,7 @@ class Streamer {
     if (quality === '1080p') {
       this.config.width = 1080;
       this.config.height = 1920;
-      this.config.bitrate = '4M';
+      this.config.bitrate = '3M'; // 降低位元率以減少延遲
     } else if (quality === '480p') {
       this.config.width = 480;
       this.config.height = 854;
@@ -423,6 +450,27 @@ class Streamer {
         ws.send(JSON.stringify({ type: 'error', message: 'Screenshot failed' }));
       }
     }
+  }
+  /**
+   * 接收客戶端的延遲回饋
+   * 客戶端應該定期發送 { type: 'latencyAck', timestamp: <client_timestamp> }
+   * @param {number} clientTimestamp - 客戶端發送時的時間戳
+   */
+  reportLatency(clientTimestamp) {
+    const now = Date.now();
+    const rtt = now - clientTimestamp; // 往返延遲
+    
+    // 單程延遲約為 RTT 的一半
+    const oneWayLatency = Math.round(rtt / 2);
+    this.stats.latency = oneWayLatency;
+    this.stats.latencySamples.push(oneWayLatency);
+    
+    // 保持最新 30 個樣本
+    if (this.stats.latencySamples.length > 30) {
+      this.stats.latencySamples = this.stats.latencySamples.slice(-30);
+    }
+    
+    log.debug('Latency reported:', oneWayLatency, 'ms');
   }
 }
 
