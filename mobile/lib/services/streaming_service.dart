@@ -157,9 +157,15 @@ class StreamingService extends ChangeNotifier {
     final frameType = data[0];
     
     if (frameType == 0x01) {
-      // JPEG 幀
+      // JPEG 影片幀
       final jpegData = data.sublist(1);
       _displayJpegFrame(jpegData);
+    } else if (frameType == 0x02) {
+      // 截圖幀
+      final jpegData = data.sublist(1);
+      _displayJpegFrame(jpegData);
+      // 觸發截圖回調
+      _handleScreenshot(jpegData);
     } else if (data.length > 4) {
       // 可能是長度前綴的幀
       // 嘗試解析長度
@@ -317,35 +323,35 @@ class StreamingService extends ChangeNotifier {
   }
 
   /**
+   * 處理截圖回調
+   */
+  Uint8List? _lastScreenshot;
+  
+  void _handleScreenshot(Uint8List jpegData) {
+    _lastScreenshot = jpegData;
+    _screenshotCompleter?.complete(jpegData);
+    _screenshotCompleter = null;
+  }
+  
+  Completer<Uint8List?>? _screenshotCompleter;
+
+  /**
    * 請求截圖
    */
   Future<Uint8List?> requestScreenshot() async {
     if (!_isConnected) return null;
 
-    final completer = Completer<Uint8List?>();
-    
-    // 設置一次性監聽器
-    void handleMessage(dynamic message) {
-      if (message is List<int>) {
-        final data = Uint8List.fromList(message);
-        if (data.length > 2 && data[0] == 0xFF && data[1] == 0xD8) {
-          _ws?.removeListener(handleMessage);
-          completer.complete(data);
-        }
-      }
-    }
-    
-    _ws?.addListener(handleMessage);
+    _screenshotCompleter = Completer<Uint8List?>();
     
     _ws?.add(jsonEncode({
       'type': 'screenshot'
     }));
 
     // 5秒超時
-    return completer.future.timeout(
+    return _screenshotCompleter!.future.timeout(
       const Duration(seconds: 5),
       onTimeout: () {
-        _ws?.removeListener(handleMessage);
+        _screenshotCompleter = null;
         return null;
       }
     );

@@ -399,7 +399,7 @@ class Streamer {
       const stream = await this.adbClient.shell(this.deviceId, 'screencap -p');
       const chunks = [];
       
-      await new Promise((resolve) => {
+      await new Promise((resolve, reject) => {
         stream.on('data', (chunk) => chunks.push(chunk));
         stream.on('end', resolve);
         stream.on('error', reject);
