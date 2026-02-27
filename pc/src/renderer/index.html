@@ -17,6 +17,7 @@
       color: white;
       min-height: 100vh;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
     }
@@ -24,6 +25,8 @@
     .container {
       text-align: center;
       padding: 24px;
+      width: 100%;
+      max-width: 400px;
     }
     
     .logo {
@@ -73,12 +76,77 @@
     
     .status-dot.connected {
       background: #10b981;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
     }
     
     .info {
       font-size: 14px;
       opacity: 0.8;
       margin-top: 16px;
+    }
+    
+    .info-box {
+      background: rgba(0,0,0,0.2);
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 16px;
+      text-align: left;
+    }
+    
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .info-row:last-child {
+      border-bottom: none;
+    }
+    
+    .info-label {
+      opacity: 0.7;
+    }
+    
+    .info-value {
+      font-weight: bold;
+    }
+    
+    .info-value.success {
+      color: #10b981;
+    }
+    
+    .info-value.warning {
+      color: #fbbf24;
+    }
+    
+    .info-value.error {
+      color: #ef4444;
+    }
+    
+    .qr-section {
+      margin-top: 24px;
+      padding: 16px;
+      background: white;
+      border-radius: 12px;
+    }
+    
+    .qr-placeholder {
+      width: 150px;
+      height: 150px;
+      background: #f3f4f6;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      color: #6b7280;
+      font-size: 12px;
     }
   </style>
 </head>
@@ -103,45 +171,101 @@
       <span id="status-text">等待連線...</span>
     </div>
     
-    <div class="info">
-      請使用手機 APP 掃描或輸入上方 ID 進行連線
+    <div class="info-box">
+      <div class="info-row">
+        <span class="info-label">連線數</span>
+        <span class="info-value" id="connection-count">0</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">ADB 狀態</span>
+        <span class="info-value" id="adb-status">檢查中...</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">模擬器</span>
+        <span class="info-value" id="emulator-status">未知</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">串流狀態</span>
+        <span class="info-value" id="stream-status">待機中</span>
+      </div>
+    </div>
+    
+    <div class="qr-section">
+      <p style="color: #374151; margin-bottom: 12px; font-weight: bold;">手機掃描連線</p>
+      <div class="qr-placeholder">
+        QR Code
+      </div>
+      <p style="color: #6b7280; font-size: 12px; margin-top: 12px;">
+        或在手機輸入 IP: <span id="local-ip">192.168.x.x</span>
+      </p>
     </div>
     
     <div class="info">
-      ADB 狀態: <span id="adb-status">檢查中...</span>
+      請使用 MuRemote App 掃描或輸入上方 IP 進行連線
     </div>
   </div>
 
   <script>
     async function updateInfo() {
       try {
+        // 獲取 PC ID
         const pcId = await window.electronAPI.getPcId();
         document.getElementById('pc-id').textContent = pcId;
         
+        // 獲取連線數
         const count = await window.electronAPI.getConnectedCount();
         const dot = document.getElementById('status-dot');
         const text = document.getElementById('status-text');
+        const countEl = document.getElementById('connection-count');
+        
+        countEl.textContent = count;
         
         if (count > 0) {
           dot.classList.add('connected');
-          text.textContent = '已連線 (' + count + ')';
+          text.textContent = `已連線 (${count})`;
         } else {
           dot.classList.remove('connected');
           text.textContent = '等待連線...';
         }
         
+        // 獲取 ADB 狀態
         const adbStatus = await window.electronAPI.getAdbStatus();
-        const adbText = document.getElementById('adb-status');
+        const adbEl = document.getElementById('adb-status');
+        const emulatorEl = document.getElementById('emulator-status');
         
         if (adbStatus === 'connected') {
-          adbText.textContent = '✓ 已連接模擬器';
-          adbText.style.color = '#10b981';
+          adbEl.textContent = '✓ 已連接';
+          adbEl.className = 'info-value success';
+          emulatorEl.textContent = 'MuMu 模擬器';
+          emulatorEl.className = 'info-value success';
         } else if (adbStatus === 'no_devices') {
-          adbText.textContent = '⚠ 未找到模擬器';
-          adbText.style.color = '#fbbf24';
+          adbEl.textContent = '⚠ 未找到設備';
+          adbEl.className = 'info-value warning';
+          emulatorEl.textContent = '請開啟模擬器';
+          emulatorEl.className = 'info-value warning';
         } else {
-          adbText.textContent = '✗ 未連接';
-          adbText.style.color = '#ef4444';
+          adbEl.textContent = '✗ 未連接';
+          adbEl.className = 'info-value error';
+          emulatorEl.textContent = '未知';
+          emulatorEl.className = 'info-value error';
+        }
+        
+        // 獲取串流狀態
+        const streamStatus = await window.electronAPI.getStreamStatus();
+        const streamEl = document.getElementById('stream-status');
+        
+        if (streamStatus === 'active') {
+          streamEl.textContent = '傳輸中';
+          streamEl.className = 'info-value success';
+        } else {
+          streamEl.textContent = '待機中';
+          streamEl.className = 'info-value';
+        }
+        
+        // 獲取本地 IP
+        const localIp = await window.electronAPI.getLocalIp();
+        if (localIp) {
+          document.getElementById('local-ip').textContent = localIp;
         }
         
       } catch (e) {
@@ -149,7 +273,7 @@
       }
     }
     
-    // Update every 2 seconds
+    // 更新信息
     updateInfo();
     setInterval(updateInfo, 2000);
   </script>
