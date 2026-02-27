@@ -14,6 +14,8 @@ MuRemote 是一款讓您可以透過手機遠端控制電腦上的 MuMu 模擬�
 - 🎮 低延遲操作體驗
 - 🔒 帳號綁定安全驗證
 - 🖥️ 跨平台支援
+- 🔍 **自動設備發現** - mDNS/Bonjour 區域網路自動搜尋
+- ⚡ **多元串流方式** - scrcpy / FFmpeg 協議支援
 
 ### 競爭對手
 
@@ -28,14 +30,20 @@ MuRemote 是一款讓您可以透過手機遠端控制電腦上的 MuMu 模擬�
 muremote-app/
 ├── mobile/           # 手機 APP (Flutter)
 │   ├── lib/
-│   │   ├── screens/    # 畫面
-│   │   ├── services/    # 服務 (WebRTC, Auth)
+│   │   ├── screens/    # 畫面 (home, connection, streaming, settings)
+│   │   ├── services/   # 服務 (WebRTC, Auth, Streaming, Discovery)
 │   │   └── main.dart
 │   └── pubspec.yaml
 │
 ├── pc/              # PC Client (Electron)
 │   ├── src/
 │   │   ├── main/       # 主程序
+│   │   │   ├── main.js           # 入口點
+│   │   │   ├── streamer.js       # 螢幕串流
+│   │   │   ├── touch_handler.js  # 觸控處理
+│   │   │   ├── device_manager.js # ADB 設備管理
+│   │   │   ├── mdns_advertiser.js # mDNS 服務廣播
+│   │   │   └── ...
 │   │   ├── preload/     # 預加載
 │   │   └── renderer/    # UI
 │   └── package.json
@@ -53,6 +61,8 @@ muremote-app/
 - Flutter SDK 3.0+
 - Node.js 18+
 - Electron 28+
+- ADB (Android Debug Bridge)
+- FFmpeg (可選，用於備用串流)
 
 ### 安裝
 
@@ -78,28 +88,78 @@ npm start
 
 ### 手機端
 - **Framework**: Flutter
-- **串流**: WebRTC
+- **串流**: WebSocket + MJPEG
+- **設備發現**: mDNS/Bonjour
 - **狀態管理**: Provider
+- **控制協議**: WebSocket 觸控事件
 
 ### PC 端
 - **Framework**: Electron
 - **控制協議**: ADB (Android Debug Bridge)
+- **螢幕擷取**: scrcpy 協議 / FFmpeg + ADB screenrecord
 - **通訊**: WebSocket
+- **服務發現**: Avahi/dns-sd/Bonjour
+
+### 數據流
+
+```
+┌─────────────┐      WebSocket/MJPEG    ┌─────────────┐      ADB       ┌─────────────┐
+│  手機 App   │ ◄──────────────────►   │   PC Client │ ◄───────────► │ MuMu 模擬器 │
+│ (Flutter)  │                         │  (Electron) │               │             │
+└─────────────┘                         └─────────────┘               └─────────────┘
+       │                                       │
+       │           mDNS/Bonjour                │
+       └─────────────────────────────────────┘
+```
 
 ---
 
-## Roadmap
+## 開發進度
 
-### Phase 1 (POC)
-- [x] 專案規劃
-- [x] 基礎架構
-- [ ] 技術驗證 (ADB + 螢幕串流)
-- [ ] 原型開發
+### Phase 1: POC 技術驗證 ✅ (完成)
+- [x] 專案規劃與規格文件
+- [x] 基礎架構 (Flutter + Electron)
+- [x] ADB 連線與設備管理
+- [x] 螢幕串流 (scrcpy / FFmpeg)
+- [x] 觸控映射與控制
+- [x] 鍵盤輸入支援
+- [x] 畫質/幀率調整
+- [x] 截圖功能
+- [x] WebRTC 訊號伺服器
+- [x] 設備自動發現 (mDNS/Bonjour)
 
-### Phase 2
-- [ ] 優化延遲
-- [ ] 增加畫質選項
-- [ ] 多開支援
+### Phase 2: 原型開發 🚧 (進行中)
+- [ ] 端對端連線測試
+- [ ] 延遲優化
+- [ ] 用戶測試與回饋
+
+### Phase 3: 優化與發布 📋 (規劃中)
+- [ ] 多開同步控制
+- [ ] 虛擬鍵盤
+- [ ] 高畫質 (4K) 支援
+
+---
+
+## 功能清單
+
+### 已實現
+| 功能 | 說明 | 狀態 |
+|------|------|------|
+| 遠端連線 | 手機 → 電腦 MuMu 模擬器連線 | ✅ |
+| 螢幕串流 | 電腦畫面傳輸到手機 | ✅ |
+| 觸控映射 | 觸控操作轉換為滑鼠點擊/滑動 | ✅ |
+| 畫質調整 | 720p / 1080p 選擇 | ✅ |
+| 連線狀態指示 | 顯示延遲、幀率 | ✅ |
+| 截圖功能 | 即時截圖 | ✅ |
+| 鍵盤輸入 | 虛擬鍵盤 + 快捷鍵 | ✅ |
+| 自動發現 | mDNS/Bonjour 設備搜尋 | ✅ |
+
+---
+
+## 已知問題
+
+- mDNS 服務發現可能需要系統安裝對應的工具 (avahi-daemon/Linux, Bonjour/Windows)
+- 部分 MuMu 版本可能需要手動開啟 ADB 端口
 
 ---
 
