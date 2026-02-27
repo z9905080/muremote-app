@@ -72,8 +72,11 @@ class StreamingService extends ChangeNotifier {
 
   /**
    * 連線到 PC Client
+   * @param pcId - 電腦 ID
+   * @param serverUrl - WebSocket 伺服器 URL (可選)
+   * @param metadata - 連線元數據，包含模擬器類型等 (可選)
    */
-  Future<void> connect(String pcId, {String? serverUrl}) async {
+  Future<void> connect(String pcId, {String? serverUrl, Map<String, dynamic>? metadata}) async {
     if (_isConnected || _isConnecting) return;
 
     _isConnecting = true;
@@ -105,6 +108,13 @@ class StreamingService extends ChangeNotifier {
 
       // 等待歡迎消息
       await Future.delayed(const Duration(milliseconds: 500));
+
+      // 發送連線請求，包含元數據（如模擬器類型）
+      _ws?.add(jsonEncode({
+        'type': 'connect',
+        'pcId': pcId,
+        if (metadata != null) 'metadata': metadata,
+      }));
 
       _isConnected = true;
       _isConnecting = false;

@@ -8,12 +8,37 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:bonjour/bonjour.dart';
 
+/// 模擬器類型
+enum EmulatorType {
+  mumu('MuMu 模擬器', 'mumu'),
+  nox('夜神模擬器', 'nox'),
+  ldplayer('雷電模擬器', 'ldplayer'),
+  bluestacks('BlueStacks', 'bluestacks'),
+  genymotion('Genymotion', 'genymotion'),
+  memu('逍遙模擬器', 'memu'),
+  koplayer('KOPlayer', 'koplator'),
+  unknown('未知', 'unknown');
+
+  final String displayName;
+  final String key;
+  const EmulatorType(this.displayName, this.key);
+
+  static EmulatorType fromString(String? value) {
+    if (value == null) return EmulatorType.unknown;
+    return EmulatorType.values.firstWhere(
+      (e) => e.key.toLowerCase() == value.toLowerCase(),
+      orElse: () => EmulatorType.unknown,
+    );
+  }
+}
+
 class DeviceInfo {
   final String name;
   final String pcId;
   final String ip;
   final int port;
   final String host;
+  final EmulatorType emulatorType;
 
   DeviceInfo({
     required this.name,
@@ -21,6 +46,7 @@ class DeviceInfo {
     required this.ip,
     required this.port,
     required this.host,
+    this.emulatorType = EmulatorType.unknown,
   });
 
   factory DeviceInfo.fromJson(Map<String, dynamic> json) {
@@ -30,11 +56,24 @@ class DeviceInfo {
       ip: json['ip'] ?? '',
       port: json['port'] ?? 8080,
       host: json['host'] ?? '',
+      emulatorType: EmulatorType.fromString(json['emulatorType']),
+    );
+  }
+
+  /// 從 mDNS TXT 記錄解析設備信息
+  factory DeviceInfo.fromTxt(Map<String, String> txt, String host, int port) {
+    return DeviceInfo(
+      name: txt['name'] ?? 'MuRemote',
+      pcId: txt['pcId'] ?? '',
+      ip: host,
+      port: port,
+      host: host,
+      emulatorType: EmulatorType.fromString(txt['emulatorType']),
     );
   }
 
   @override
-  String toString() => 'DeviceInfo($name, $pcId, $ip:$port)';
+  String toString() => 'DeviceInfo($name, $pcId, $ip:$port, $emulatorType)';
 }
 
 class DiscoveryService extends ChangeNotifier {
@@ -98,10 +137,12 @@ class DiscoveryService extends ChangeNotifier {
   void _handleServiceFound(Service service) {
     debugPrint('Found service: ${service.name} at ${service.host}:${service.port}');
     
-    // 嘗試從 TXT 記錄獲取 PC ID
+    // 嘗試從 TXT 記錄獲取 PC ID 和模擬器類型
     String pcId = '';
+    String emulatorType = 'unknown';
     if (service.txt != null) {
       pcId = service.txt!['pcId'] ?? '';
+      emulatorType = service.txt!['emulatorType'] ?? 'unknown';
     }
 
     // 如果沒有 PC ID，從名稱解析
@@ -111,6 +152,7 @@ class DiscoveryService extends ChangeNotifier {
       ip: service.host ?? '',
       port: service.port ?? 8080,
       host: service.name,
+      emulatorType: EmulatorType.fromString(emulatorType),
     );
 
     // 更新或添加設備

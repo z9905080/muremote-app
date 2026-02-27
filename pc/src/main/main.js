@@ -8,6 +8,7 @@ const Streamer = require('./streamer');
 const TouchHandler = require('./touch_handler');
 const MultiTouchHandler = require('./multi_touch_handler');
 const MdnsAdvertiser = require('./mdns_advertiser');
+const DeviceManager = require('./device_manager');
 const config = require('../config');
 
 log.transports.file.level = 'info';
@@ -21,6 +22,7 @@ let streamer = null;
 let touchHandler = null;
 let multiTouchHandler = null;
 let mdnsAdvertiser = null;
+let deviceManager = null;
 let connectedClients = new Map();
 let pcId = uuidv4().substring(0, 8).toUpperCase();
 
@@ -89,23 +91,34 @@ function createTray() {
 
 async function connectADB() {
   try {
-    adbClient = AdbClient.createClient({ host: ADB_HOST, port: ADB_PORT });
+    // 使用 DeviceManager 進行設備管理
+    deviceManager = new DeviceManager();
     
-    const devices = await adbClient.listDevices();
-    log.info('ADB devices:', devices.length);
-
-    if (devices.length > 0) {
-      const device = devices[0];
+    // 初始化並連接模擬器
+    const connected = await deviceManager.initialize();
+    
+    if (connected && deviceManager.primaryDevice) {
+      const device = deviceManager.primaryDevice;
       
       // 初始化 Streamer 和 TouchHandler
-      streamer = new Streamer(adbClient, device.id);
-      touchHandler = new TouchHandler(adbClient, device.id);
+      streamer = new Streamer(deviceManager.adbPath, device.id);
+      touchHandler = new TouchHandler(deviceManager.adbPath, device.id);
       multiTouchHandler = new MultiTouchHandler(touchHandler);
       
       // 獲取螢幕大小
       await touchHandler.updateScreenSize();
       
-      log.info('Connected to device:', device.id);
+      log.info('Connected to device:', device.id, '- Type:', device.emulatorName || device.emulatorType);
+      
+      // 如果有主要設備，更新 mDNS 廣告的模擬器類型
+      if (mdnsAdvertiser && device.emulatorType) {
+        mdnsAdvertiser.setEmulatorType(device.emulatorType);
+        mdnsAdvertiser.stop();
+        mdnsAdvertiser.start();
+        log.info('Updated mDNS with emulator type:', device.emulatorType);
+      }
+    } else {
+      log.info('No emulator connected, waiting for connection...');
     }
 
     return true;
@@ -154,6 +167,50 @@ function startWebSocketServer() {
 
 async function handleClientMessage(clientId, ws, data) {
   switch (data.type) {
+    case 'connect':
+      // 客戶端連線請求，包含元數據（如模擬器類型）
+      log.info('Client connection request:', data);
+      if (data.metadata && data.metadata.emulatorType) {
+        const emulatorType = data.metadata.emulatorType;
+        log.info('Client requested emulator type:', emulatorType);
+        
+        // 如果客戶端指定了模擬器類型，嘗試切換連接
+        if (deviceManager && emulatorType !== 'unknown') {
+          deviceManager.setEmulatorType(emulatorType);
+          // 重新整理設備列表
+          await deviceManager.refreshDevices();
+          
+          if (deviceManager.primaryDevice) {
+            // 更新 streamer 和 touch handler
+            const device = deviceManager.primaryDevice;
+            streamer = new Streamer(deviceManager.adbPath, device.id);
+            touchHandler = new TouchHandler(deviceManager.adbPath, device.id);
+            multiTouchHandler = new MultiTouchHandler(touchHandler);
+            
+            log.info('Switched to emulator:', device.emulatorName || emulatorType);
+            
+            // 發送確認消息
+            ws.send(JSON.stringify({
+              type: 'connected',
+              emulatorType: emulatorType,
+              deviceId: device.id,
+              screenSize: await touchHandler.updateScreenSize()
+            }));
+          }
+        } else {
+          ws.send(JSON.stringify({
+            type: 'connected',
+            emulatorType: 'unknown'
+          }));
+        }
+      } else {
+        ws.send(JSON.stringify({
+          type: 'connected',
+          emulatorType: deviceManager?.primaryDevice?.emulatorType || 'unknown'
+        }));
+      }
+      break;
+
     case 'offer':
       // WebRTC offer - not using in POC, using WebSocket streaming instead
       log.info('Received WebRTC offer (using WebSocket streaming instead)');
