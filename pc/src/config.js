@@ -48,4 +48,18 @@ module.exports = {
     'stun:stun.l.google.com:19302',
     'stun:stun1.l.google.com:19302',
   ],
+
+  // mDNS 服務發現配置
+  mdns: {
+    enabled: true,
+    serviceType: '_muremote._tcp',
+    // 自動發布服務
+    advertise: true,
+  },
+
+  // 系統托盤配置
+  tray: {
+    showWindow: true,
+    minimizeToTray: true,
+  },
 };

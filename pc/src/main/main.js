@@ -6,6 +6,8 @@ const { v4: uuidv4 } = require('uuid');
 const log = require('electron-log');
 const Streamer = require('./streamer');
 const TouchHandler = require('./touch_handler');
+const MdnsAdvertiser = require('./mdns_advertiser');
+const config = require('../config');
 
 log.transports.file.level = 'info';
 log.info('MuRemote PC Client starting...');
@@ -16,6 +18,7 @@ let adbClient = null;
 let wsServer = null;
 let streamer = null;
 let touchHandler = null;
+let mdnsAdvertiser = null;
 let connectedClients = new Map();
 let pcId = uuidv4().substring(0, 8).toUpperCase();
 
@@ -285,6 +288,13 @@ app.whenReady().then(async () => {
   await connectADB();
   startWebSocketServer();
 
+  // 啟動 mDNS 服務發現
+  if (config.mdns && config.mdns.advertise) {
+    mdnsAdvertiser = new MdnsAdvertiser(pcId, config.websocket.port);
+    mdnsAdvertiser.start();
+    log.info('mDNS advertiser started');
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -300,6 +310,7 @@ app.on('before-quit', () => {
   app.isQuitting = true;
   if (streamer) streamer.stopStream();
   if (wsServer) wsServer.close();
+  if (mdnsAdvertiser) mdnsAdvertiser.stop();
   log.info('MuRemote PC Client shutting down');
 });
 

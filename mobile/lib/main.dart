@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'services/webrtc_service.dart';
 import 'services/streaming_service.dart';
 import 'services/auth_service.dart';
+import 'services/discovery_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/connection_screen.dart';
 import 'screens/settings_screen.dart';
@@ -22,6 +23,7 @@ class MuRemoteApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthService()),
         ChangeNotifierProvider(create: (_) => WebRTCService()),
         ChangeNotifierProvider(create: (_) => StreamingService()),
+        ChangeNotifierProvider(create: (_) => DiscoveryService()),
       ],
       child: MaterialApp(
         title: 'MuRemote',

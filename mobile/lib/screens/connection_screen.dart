@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/webrtc_service.dart';
 import '../services/streaming_service.dart';
+import '../services/discovery_service.dart';
 
 class ConnectionScreen extends StatefulWidget {
   const ConnectionScreen({super.key});
@@ -13,6 +14,16 @@ class ConnectionScreen extends StatefulWidget {
 class _ConnectionScreenState extends State<ConnectionScreen> {
   final _pcIdController = TextEditingController();
   final _ipController = TextEditingController(text: '192.168.1.100');
+  bool _showManualInput = false;
+  
+  @override
+  void initState() {
+    super.initState();
+    // 開始設備發現
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DiscoveryService>().startDiscovery();
+    });
+  }
   
   @override
   void dispose() {
@@ -21,14 +32,34 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     super.dispose();
   }
 
+  void _connectToDevice(DeviceInfo device) {
+    final streamingService = context.read<StreamingService>();
+    streamingService.connect(
+      device.pcId,
+      serverUrl: 'ws://${device.ip}:${device.port}',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final streamingService = context.watch<StreamingService>();
+    final discoveryService = context.watch<DiscoveryService>();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('連線'),
         backgroundColor: Colors.blue.shade700,
+        actions: [
+          IconButton(
+            icon: Icon(_showManualInput ? Icons.wifi_find : Icons.edit),
+            onPressed: () {
+              setState(() {
+                _showManualInput = !_showManualInput;
+              });
+            },
+            tooltip: _showManualInput ? '顯示自動發現' : '手動輸入',
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -78,128 +109,253 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 32),
-
-            // PC IP Input
-            Text(
-              '電腦 IP 位址',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _ipController,
-              decoration: InputDecoration(
-                hintText: '例如: 192.168.1.100',
-                prefixIcon: const Icon(Icons.wifi),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              keyboardType: TextInputType.number,
-            ),
-            const SizedBox(height: 16),
-
-            // PC ID Input (Optional)
-            Text(
-              '電腦 ID (可選)',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _pcIdController,
-              decoration: InputDecoration(
-                hintText: '例如: ABC-123-XYZ',
-                prefixIcon: const Icon(Icons.computer),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
             const SizedBox(height: 24),
 
-            // Connect Button
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton.icon(
-                onPressed: streamingService.isConnecting
-                  ? null
-                  : () async {
-                      final ip = _ipController.text.trim();
-                      if (ip.isNotEmpty) {
-                        await streamingService.connect(
-                          _pcIdController.text.trim().isEmpty 
-                            ? ip 
-                            : _pcIdController.text.trim(),
-                          serverUrl: 'ws://$ip:8080',
-                        );
-                        
-                        if (streamingService.isConnected && context.mounted) {
-                          // 導航到串流頁面
-                          Navigator.pushNamed(context, '/stream');
-                        }
-                      }
-                    },
-                icon: streamingService.isConnecting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
+            // Auto Discovery Section
+            if (!_showManualInput) ...[
+              // Device List Header
+              Row(
+                children: [
+                  const Icon(Icons.devices, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    '發現的設備',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (discoveryService.isDiscovering)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.link),
-                label: Text(
-                  streamingService.isConnecting ? '連線中...' : '開始連線',
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.refresh),
+                      onPressed: () => discoveryService.startDiscovery(),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Device List
+              if (discoveryService.devices.isEmpty)
+                Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.search_off,
+                          size: 64,
+                          color: Colors.grey.shade400,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          '搜尋中...',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '確保 PC Client 正在執行',
+                          style: TextStyle(
+                            color: Colors.grey.shade500,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: discoveryService.devices.length,
+                    itemBuilder: (context, index) {
+                      final device = discoveryService.devices[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: const CircleAvatar(
+                            child: Icon(Icons.computer),
+                          ),
+                          title: Text(device.name),
+                          subtitle: Text('${device.ip}:${device.port}'),
+                          trailing: streamingService.isConnecting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.chevron_right),
+                          onTap: streamingService.isConnecting
+                            ? null
+                            : () => _connectToDevice(device),
+                        ),
+                      );
+                    },
+                  ),
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue.shade700,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
+
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 8),
+
+              // Manual Input Toggle
+              Center(
+                child: TextButton.icon(
+                  icon: const Icon(Icons.keyboard),
+                  label: const Text('或手動輸入 IP'),
+                  onPressed: () {
+                    setState(() {
+                      _showManualInput = true;
+                    });
+                  },
+                ),
+              ),
+            ],
+
+            // Manual Input Section
+            if (_showManualInput) ...[
+              // PC IP Input
+              Text(
+                '電腦 IP 位址',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _ipController,
+                decoration: InputDecoration(
+                  hintText: '例如: 192.168.1.100',
+                  prefixIcon: const Icon(Icons.wifi),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+
+              // PC ID Input (Optional)
+              Text(
+                '電腦 ID (可選)',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _pcIdController,
+                decoration: InputDecoration(
+                  hintText: '例如: ABC-123-XYZ',
+                  prefixIcon: const Icon(Icons.computer),
+                  border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               ),
-            ),
+              const SizedBox(height: 24),
 
-            const Spacer(),
+              // Connect Button
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: ElevatedButton.icon(
+                  onPressed: streamingService.isConnecting
+                    ? null
+                    : () async {
+                        final ip = _ipController.text.trim();
+                        if (ip.isNotEmpty) {
+                          await streamingService.connect(
+                            _pcIdController.text.trim().isEmpty 
+                              ? ip 
+                              : _pcIdController.text.trim(),
+                            serverUrl: 'ws://$ip:8080',
+                          );
+                          
+                          if (streamingService.isConnected && context.mounted) {
+                            Navigator.pushNamed(context, '/stream');
+                          }
+                        }
+                      },
+                  icon: streamingService.isConnecting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.link),
+                  label: Text(
+                    streamingService.isConnecting ? '連線中...' : '開始連線',
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade700,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+
+              const Spacer(),
+
+              // Back to Discovery
+              Center(
+                child: TextButton.icon(
+                  icon: const Icon(Icons.wifi_find),
+                  label: const Text('返回自動發現'),
+                  onPressed: () {
+                    setState(() {
+                      _showManualInput = false;
+                    });
+                  },
+                ),
+              ),
+            ],
 
             // Instructions
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.info_outline, color: Colors.blue.shade700),
-                      const SizedBox(width: 8),
-                      Text(
-                        '連線說明',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue.shade700,
+            if (_showManualInput)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.blue.shade700),
+                        const SizedBox(width: 8),
+                        Text(
+                          '連線說明',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('1. 確保手機和電腦在同一個 WiFi 網路'),
-                  const Text('2. 在電腦上執行 MuRemote PC Client'),
-                  const Text('3. 輸入電腦的 IP 位址'),
-                  const Text('4. 點擊連線開始遠端控制'),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('1. 確保手機和電腦在同一個 WiFi 網路'),
+                    const Text('2. 在電腦上執行 MuRemote PC Client'),
+                    const Text('3. 輸入電腦的 IP 位址'),
+                    const Text('4. 點擊連線開始遠端控制'),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),

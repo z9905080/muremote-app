@@ -22,6 +22,8 @@ dependencies:
   device_info_plus: ^9.0.0
   # Network info
   network_info_plus: ^5.0.0
+  # mDNS/Bonjour for device discovery
+  bonjour: ^2.1.0
 
 dev_dependencies:
   flutter_test:

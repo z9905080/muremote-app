@@ -23,6 +23,7 @@ class StreamingService extends ChangeNotifier {
   bool _isStreaming = false;
   int _latency = 0;
   int _fps = 0;
+  String _resolution = '720p';
   String _quality = '720p';
   String _pcId = '';
   int _screenWidth = 1080;
