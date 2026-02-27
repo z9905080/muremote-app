@@ -62,9 +62,9 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.wifi),
             title: const Text('伺服器位址'),
-            subtitle: const Text('192.168.1.100:8080'),
+            subtitle: Text(streamingService.serverUrl),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
+            onTap: () => _showServerUrlDialog(context, streamingService),
           ),
           const Divider(),
 
@@ -101,6 +101,39 @@ class SettingsScreen extends StatelessWidget {
           color: Colors.blue.shade700,
           fontWeight: FontWeight.bold,
         ),
+      ),
+    );
+  }
+
+  void _showServerUrlDialog(BuildContext context, StreamingService service) {
+    final controller = TextEditingController(text: service.serverUrl);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('伺服器位址'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: '192.168.1.100:8080',
+            labelText: 'WebSocket 位址',
+            prefixText: 'ws://',
+          ),
+          keyboardType: TextInputType.url,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              service.setServerUrl(controller.text);
+              Navigator.pop(context);
+            },
+            child: const Text('儲存'),
+          ),
+        ],
       ),
     );
   }

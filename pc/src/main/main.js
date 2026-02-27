@@ -219,6 +219,17 @@ async function handleClientMessage(clientId, ws, data) {
       }
       break;
 
+    case 'set-fps':
+      // 設定幀率
+      if (streamer) {
+        streamer.setFps(data.fps || 30);
+        ws.send(JSON.stringify({
+          type: 'fps-changed',
+          fps: data.fps
+        }));
+      }
+      break;
+
     case 'screenshot':
       // 請求截圖
       if (streamer) {

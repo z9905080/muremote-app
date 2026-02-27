@@ -1,6 +1,29 @@
 # MuRemote 開發進度
 
-## 第九次回報 - 21:33 (台北時間 CST)
+## 第十次回報 - 21:50 (台北時間 CST)
+
+### 這段時間完成
+
+#### 代碼修正
+- [x] streaming_service.dart - 修復 `_fps` 變數重複宣告問題
+- [x] streamer.js - 修復截圖函數，使用 adbClient 替代 exec
+- [x] main.js - 新增 `set-fps` 訊息處理
+- [x] streamer.js - 新增 `setFps()` 方法和 480p 支援
+
+#### 功能新增
+- [x] streaming_service.dart - 新增 `setServerUrl()` 方法
+- [x] settings_screen.dart - 新增伺服器位址編輯功能
+
+#### 技術改進
+- 480p 畫質支援 (節省流量)
+- 截圖功能穩定性提升
+- 伺服器 URL 可從設定頁面修改
+
+---
+
+## 歷史版本
+
+## 第九回報 - 21:33 (台北時間 CST)
 
 ### 這段時間完成
 

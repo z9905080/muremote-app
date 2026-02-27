@@ -357,12 +357,25 @@ class Streamer {
       this.config.width = 1080;
       this.config.height = 1920;
       this.config.bitrate = '4M';
+    } else if (quality === '480p') {
+      this.config.width = 480;
+      this.config.height = 854;
+      this.config.bitrate = '1M';
     } else {
       this.config.width = 720;
       this.config.height = 1280;
       this.config.bitrate = '2M';
     }
     log.info('Quality set to:', quality);
+  }
+
+  /**
+   * 設定幀率
+   * @param {number} fps - 24 | 30 | 60
+   */
+  setFps(fps) {
+    this.config.fps = fps;
+    log.info('FPS set to:', fps);
   }
 
   /**
@@ -382,24 +395,33 @@ class Streamer {
    */
   async requestScreenshot(ws) {
     try {
-      const { stdout } = await this.execAdb(
-        `shell screencap -p /sdcard/screenshot.jpg`
-      );
+      // 使用 ADB shell screencap
+      const stream = await this.adbClient.shell(this.deviceId, 'screencap -p');
+      const chunks = [];
       
-      // 拉取截圖
-      const { stdout: screenshotData } = await this.execAdb(
-        `pull /sdcard/screenshot.jpg`
-      );
+      await new Promise((resolve) => {
+        stream.on('data', (chunk) => chunks.push(chunk));
+        stream.on('end', resolve);
+        stream.on('error', reject);
+      });
       
-      // 發送截圖數據
+      const screenshotData = Buffer.concat(chunks);
+      
+      // 發送截圖數據 (JPEG 格式)
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(Buffer.from([0x02, ...screenshotData]), { binary: true });
+        // 添加幀類型標記: 0x02 = screenshot
+        const frame = Buffer.alloc(screenshotData.length + 1);
+        frame[0] = 0x02; // 截圖幀
+        screenshotData.copy(frame, 1);
+        ws.send(frame, { binary: true });
       }
       
       log.info('Screenshot sent');
     } catch (error) {
       log.error('Screenshot error:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Screenshot failed' }));
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Screenshot failed' }));
+      }
     }
   }
 }

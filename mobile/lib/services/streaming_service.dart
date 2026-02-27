@@ -23,7 +23,7 @@ class StreamingService extends ChangeNotifier {
   bool _isStreaming = false;
   int _latency = 0;
   int _fps = 0;
-  String _resolution = '720p';
+  String _quality = '720p';
   String _pcId = '';
   int _screenWidth = 1080;
   int _screenHeight = 1920;
@@ -39,20 +39,20 @@ class StreamingService extends ChangeNotifier {
   // Server URL - 應該從設定中獲取
   String _serverUrl = 'ws://192.168.1.100:8080';
   
-  // 畫質設定
-  String _quality = '720p';
-  int _fps = 30;
+  // 幀率設定
+  int _setFps = 30;
 
   bool get isConnected => _isConnected;
   bool get isConnecting => _isConnecting;
   bool get isStreaming => _isStreaming;
   int get latency => _latency;
-  int get fps => _fps;
+  int get fps => _setFps;
   String get resolution => _resolution;
   Uint8List? get currentFrame => _currentJpegData;
   int get screenWidth => _screenWidth;
   int get screenHeight => _screenHeight;
   String get quality => _quality;
+  String get serverUrl => _serverUrl;
 
   StreamingService() {
     _initRenderer();
@@ -374,13 +374,30 @@ class StreamingService extends ChangeNotifier {
   Future<void> setFps(int fps) async {
     if (!_isConnected) return;
     
-    _fps = fps;
+    _setFps = fps;
     _ws?.add(jsonEncode({
       'type': 'set-fps',
       'fps': fps
     }));
     
     notifyListeners();
+  }
+
+  /**
+   * 設定伺服器位址
+   * @param url - WebSocket 伺服器位址 (例如: ws://192.168.1.100:8080)
+   */
+  void setServerUrl(String url) {
+    if (url.isEmpty) return;
+    
+    // 確保 URL 格式正確
+    if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+      url = 'ws://$url';
+    }
+    
+    _serverUrl = url;
+    notifyListeners();
+    log.info('Server URL set to: $_serverUrl');
   }
 
   /**
