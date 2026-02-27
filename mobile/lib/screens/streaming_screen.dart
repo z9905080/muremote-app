@@ -1,3 +1,4 @@
+import 'dart:math' as Math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/streaming_service.dart';
@@ -17,6 +18,11 @@ class _StreamingScreenState extends State<StreamingScreen> {
   // 多點觸控追蹤
   final Map<int, Offset> _activePointers = {};
   double? _initialPinchDistance;
+  double? _lastPinchScale;
+  int? _firstPointerId;
+  
+  // 追蹤單指還是雙指模式
+  bool _isMultiTouchMode = false;
 
   @override
   void initState() {
@@ -58,46 +64,110 @@ class _StreamingScreenState extends State<StreamingScreen> {
 
   void _handleScaleStart(ScaleStartDetails details) {
     if (details.pointerCount >= 2) {
+      _isMultiTouchMode = true;
       _initialPinchDistance = _calculatePinchDistance(details);
+      _lastPinchScale = details.scale;
+      
+      // 記錄第一個 pointer 的 ID
+      if (details.pointerCount == 2) {
+        final pointers = details.pointerPositions;
+        if (pointers.isNotEmpty) {
+          _firstPointerId = pointers.keys.first;
+        }
+      }
+      
+      // 發送 pointer-down 事件
+      _sendMultiTouchEvent(details, 'pointer-down');
     }
   }
 
   void _handleScaleUpdate(ScaleUpdateDetails details) {
     if (details.pointerCount >= 2 && _initialPinchDistance != null) {
       final currentDistance = _calculatePinchDistance(details);
-      final scale = currentDistance / _initialPinchDistance!;
       
-      // 檢測縮放手勢
-      if (scale > 1.2 || scale < 0.8) {
-        final streamingService = context.read<StreamingService>();
+      // 檢測縮放手勢 (使用 scale 變化)
+      if (_lastPinchScale != null) {
+        final scaleDiff = details.scale / _lastPinchScale!;
         
-        // 構建多點觸控數據
-        final pointers = details.focalPointDetails?.pointerPositions?.entries.map((e) => {
-          'pointerId': e.key,
-          'x': e.value.dx / MediaQuery.of(context).size.width,
-          'y': e.value.dy / MediaQuery.of(context).size.height,
-        }).toList() ?? [];
-        
-        if (pointers.length >= 2) {
-          streamingService.sendPinch(pointers);
+        // 縮放變化超過閾值
+        if (scaleDiff > 1.15 || scaleDiff < 0.85) {
+          final streamingService = context.read<StreamingService>();
+          
+          // 構建多點觸控數據
+          final pointers = _buildPointersFromScaleDetails(details);
+          
+          if (pointers.length >= 2) {
+            streamingService.sendPinch(pointers);
+          }
+          
+          _lastPinchScale = details.scale;
         }
-        
-        // 重置初始距離
-        _initialPinchDistance = currentDistance;
       }
+      
+      // 也發送 pointer-move 事件
+      _sendMultiTouchEvent(details, 'pointer-move');
+    } else if (details.pointerCount == 1 && _isMultiTouchMode) {
+      // 從雙指回到單指，發送 pointer-up
+      _isMultiTouchMode = false;
+      _sendMultiTouchEvent(details, 'pointer-up');
     }
-  }
-
-  double _calculatePinchDistance(ScaleUpdateDetails details) {
-    // 簡單的兩指距離計算
-    final focalPoint = details.focalPoint;
-    // 使用 localFocalPoint 計算兩指距離
-    // 這是一個簡化的實現
-    return details.scale;
   }
 
   void _handleScaleEnd(ScaleEndDetails details) {
     _initialPinchDistance = null;
+    _lastPinchScale = null;
+    _firstPointerId = null;
+    _isMultiTouchMode = false;
+    _activePointers.clear();
+    
+    // 發送 pointer-up 事件
+    if (details.pointerCount > 0) {
+      _sendMultiTouchEvent(details, 'pointer-up');
+    }
+  }
+
+  /// 從 ScaleUpdateDetails 建構多點觸控數據
+  List<Map<String, dynamic>> _buildPointersFromScaleDetails(ScaleUpdateDetails details) {
+    final size = MediaQuery.of(context).size;
+    final pointers = <Map<String, dynamic>>[];
+    
+    for (final entry in details.pointerPositions.entries) {
+      pointers.add({
+        'pointerId': entry.key,
+        'x': entry.value.dx / size.width,
+        'y': entry.value.dy / size.height,
+      });
+    }
+    
+    return pointers;
+  }
+
+  /// 發送多點觸控事件
+  void _sendMultiTouchEvent(ScaleUpdateDetails details, String action) {
+    final streamingService = context.read<StreamingService>();
+    final pointers = _buildPointersFromScaleDetails(details);
+    
+    if (pointers.isNotEmpty) {
+      streamingService.sendMultiTouch(pointers, action);
+    }
+  }
+
+  double _calculatePinchDistance(ScaleUpdateDetails details) {
+    // 計算兩個觸控點之間的實際距離
+    final pointerPositions = details.pointerPositions;
+    
+    if (pointerPositions.length < 2) {
+      return 1.0;
+    }
+    
+    final positions = pointerPositions.values.toList();
+    final p1 = positions[0];
+    final p2 = positions[1];
+    
+    final dx = p2.dx - p1.dx;
+    final dy = p2.dy - p1.dy;
+    
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
   void _handleTapDown(TapDownDetails details) {
