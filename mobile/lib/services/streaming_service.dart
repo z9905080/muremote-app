@@ -371,7 +371,7 @@ class StreamingService extends ChangeNotifier {
     }));
     
     notifyListeners();
-    log.info('Quality changed to: $quality');
+    log('Quality changed to: $quality');
   }
 
   /**
@@ -404,7 +404,7 @@ class StreamingService extends ChangeNotifier {
     
     _serverUrl = url;
     notifyListeners();
-    log.info('Server URL set to: $_serverUrl');
+    log('Server URL set to: $_serverUrl');
   }
 
   /**
