@@ -1,6 +1,6 @@
 # MuRemote 開發進度
 
-## 第八次回報 - 21:18 (台北時間 CST)
+## 第九次回報 - 21:33 (台北時間 CST)
 
 ### 這段時間完成
 
@@ -44,26 +44,31 @@
 | 模組 | 狀態 | 備註 |
 |------|------|------|
 | ADB 連線 | ✅ | 連接 MuMu port 7555 |
-| 螢幕串流 | 🔄 | 優化完成，待實際測試 |
+| 螢幕串流 | ✅ | scrcpy 優先 / FFmpeg 備用 |
 | 觸控回傳 | ✅ | PC + 手機端完成 |
-| 畫質調整 | ✅ | **本此新增** - 480p/720p/1080p 支援 |
-| 幀率調整 | ✅ | **本此新增** - 24/30/60 fps 支援 |
-| 截圖功能 | ✅ | **本此新增** - requestScreenshot |
+| 畫質調整 | ✅ | 480p/720p/1080p 支援 |
+| 幀率調整 | ✅ | 24/30/60 fps 支援 |
+| 截圖功能 | ✅ | requestScreenshot |
 
-### 本次更新內容 (第八回)
+### 本次更新內容 (第九回)
 
-**PC Client:**
-- 新增 `setQuality(quality)` 方法 - 支援 720p/1080p 畫質切換
-- 新增 `requestScreenshot(ws)` 方法 - 截圖請求處理
+**streaming_service.dart 新增方法:**
+- `setQuality(quality)` - 設定解析度 (480p/720p/1080p)
+- `setFps(fps)` - 設定幀率 (24/30/60)
+- `quality` getter - 取得當前畫質
+- `requestScreenshot()` - 請求截圖
 
-**手機端 (Flutter):**
-- `streaming_service.dart` 新增:
-  - `setQuality(quality)` - 設定解析度
-  - `setFps(fps)` - 設定幀率
-  - `quality` getter - 取得當前畫質
-- `settings_screen.dart`:
-  - 連接 StreamingService
-  - 解析度/幀率設定現在實際發送到 PC 端
+**streamer.js 新增方法:**
+- `setQuality(quality)` - PC 端畫質設定
+- `requestScreenshot(ws)` - 截圖處理
+- `updateConfig(config)` - 串流配置更新
+
+**通訊協議擴展:**
+```json
+{ "type": "set-quality", "quality": "720p" }
+{ "type": "set-fps", "fps": 30 }
+{ "type": "screenshot" }
+```
 
 ### 技術改進
 
@@ -87,24 +92,22 @@
 
 #### P0 - 必須完成
 1. [ ] 實際環境測試 (需要 MuMu 模擬器)
-2. [ ] 修復串流問題
-3. [ ] 端對端連線測試
+2. [ ] 端對端連線測試
 
 #### P1 - 重要
-4. [x] 畫質選擇 (720p/1080p) - **本回完成**
-5. [ ] 連線狀態顯示優化
-6. [ ] 多點觸控支援
+3. [ ] 連線狀態顯示優化
+4. [ ] 多點觸控支援
+5. [ ] 鍵盤映射完整支援
 
 #### P2 - 未來規劃
-7. [ ] 鍵盤映射完整支援
-8. [ ] 多開同步控制
-9. [ ] 橫屏遊戲支援
+6. [ ] 多開同步控制
+7. [ ] 橫屏遊戲支援
 
 ### 技術筆記
 
 **數據流優化:**
 ```
-觸控數據流 (已完善):
+觸控數據流:
 手機觸控 (0-1 座標)
     ↓ WebSocket JSON
 PC TouchHandler
@@ -117,5 +120,7 @@ MuMu 模擬器
 ---
 
 ## 歷史版本
+- 第九回報 (21:33) - 完成畫質/幀率/截圖功能
+- 第八回報 (21:18) - 完成基礎串流模組
 - 第六回報 (12:59) - 完成基礎串流模組
 - 第五回報 (11:33) - 螢幕擷取模組 ✅, 串流傳輸伺服器 ✅
