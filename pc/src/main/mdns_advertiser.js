@@ -8,11 +8,19 @@ const os = require('os');
 const log = require('electron-log');
 
 class MdnsAdvertiser {
-  constructor(pcId, port = 8080) {
+  constructor(pcId, port = 8080, emulatorType = 'unknown') {
     this.pcId = pcId;
     this.port = port;
+    this.emulatorType = emulatorType;
     this.serviceName = `MuRemote-${pcId}`;
     this.process = null;
+  }
+
+  /**
+   * 設置模擬器類型
+   */
+  setEmulatorType(type) {
+    this.emulatorType = type;
   }
 
   /**
@@ -48,33 +56,14 @@ class MdnsAdvertiser {
    */
   startAvahi() {
     try {
-      // 創建 Avahi service file
-      const serviceFile = `/tmp/${this.serviceName}.service`;
-      const fs = require('fs');
-      
-      const content = `
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<service-group>
-  <name replace-wildcards="yes">${this.serviceName}</name>
-  <service>
-    <type>_muremote._tcp</type>
-    <port>${this.port}</port>
-    <txt-record>pcId=${this.pcId}</txt-record>
-    <txt-record>version=1.0</txt-record>
-  </service>
-</service-group>
-`;
-      
-      fs.writeFileSync(serviceFile, content);
-
       // 發布服務
       this.process = spawn('avahi-publish-service', [
         this.serviceName,
         '_muremote._tcp',
         this.port.toString(),
         `pcId=${this.pcId}`,
-        'version=1.0'
+        `version=1.0`,
+        `emulatorType=${this.emulatorType}`
       ]);
 
       this.process.on('error', (err) => {
@@ -85,7 +74,7 @@ class MdnsAdvertiser {
         log.info('Avahi closed:', code);
       });
 
-      log.info('mDNS advertisement started (Avahi)');
+      log.info(`mDNS advertisement started (Avahi) - emulator: ${this.emulatorType}`);
       return true;
     } catch (error) {
       log.error('Avahi start failed:', error);
@@ -105,14 +94,15 @@ class MdnsAdvertiser {
         'local',
         this.port.toString(),
         'pcId=' + this.pcId,
-        'version=1.0'
+        'version=1.0',
+        'emulatorType=' + this.emulatorType
       ]);
 
       this.process.on('error', (err) => {
         log.error('dns-sd error:', err);
       });
 
-      log.info('mDNS advertisement started (dns-sd)');
+      log.info(`mDNS advertisement started (dns-sd) - emulator: ${this.emulatorType}`);
       return true;
     } catch (error) {
       log.error('dns-sd start failed:', error);
@@ -134,11 +124,15 @@ class MdnsAdvertiser {
         name: this.serviceName,
         type: 'muremote',
         port: this.port,
-        txt: { pcId: this.pcId, version: '1.0' }
+        txt: { 
+          pcId: this.pcId, 
+          version: '1.0',
+          emulatorType: this.emulatorType
+        }
       });
 
       this._service = service;
-      log.info('mDNS advertisement started (Bonjour)');
+      log.info(`mDNS advertisement started (Bonjour) - emulator: ${this.emulatorType}`);
       return true;
     } catch (error) {
       log.error('Windows mDNS failed:', error);

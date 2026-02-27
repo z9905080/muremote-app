@@ -40,6 +40,78 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     );
   }
 
+  /// 顯示模擬器選擇對話框
+  void _showEmulatorSelector(BuildContext context, DeviceInfo device) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _EmulatorSelectorSheet(
+        device: device,
+        onConnect: (emulatorType) {
+          Navigator.pop(context);
+          _connectWithEmulator(device, emulatorType);
+        },
+      ),
+    );
+  }
+
+  /// 連接時指定模擬器類型
+  void _connectWithEmulator(DeviceInfo device, EmulatorType emulatorType) {
+    final streamingService = context.read<StreamingService>();
+    // 傳送模擬器類型到 PC 端
+    streamingService.connect(
+      device.pcId,
+      serverUrl: 'ws://${device.ip}:${device.port}',
+      metadata: {'emulatorType': emulatorType.key},
+    );
+  }
+
+  /// 獲取模擬器對應的顏色
+  Color _getEmulatorColor(EmulatorType type) {
+    switch (type) {
+      case EmulatorType.mumu:
+        return Colors.blue;
+      case EmulatorType.nox:
+        return Colors.purple;
+      case EmulatorType.ldplayer:
+        return Colors.orange;
+      case EmulatorType.bluestacks:
+        return Colors.green;
+      case EmulatorType.genymotion:
+        return Colors.teal;
+      case EmulatorType.memu:
+        return Colors.red;
+      case EmulatorType.koplayer:
+        return Colors.indigo;
+      case EmulatorType.unknown:
+        return Colors.grey;
+    }
+  }
+
+  /// 獲取模擬器對應的圖標
+  IconData _getEmulatorIcon(EmulatorType type) {
+    switch (type) {
+      case EmulatorType.mumu:
+        return Icons.smartphone;
+      case EmulatorType.nox:
+        return Icons.smartphone;
+      case EmulatorType.ldplayer:
+        return Icons.smartphone;
+      case EmulatorType.bluestacks:
+        return Icons.smartphone;
+      case EmulatorType.genymotion:
+        return Icons.smartphone;
+      case EmulatorType.memu:
+        return Icons.smartphone;
+      case EmulatorType.koplayer:
+        return Icons.smartphone;
+      case EmulatorType.unknown:
+        return Icons.computer;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final streamingService = context.watch<StreamingService>();
@@ -181,11 +253,39 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         child: ListTile(
-                          leading: const CircleAvatar(
-                            child: Icon(Icons.computer),
+                          leading: CircleAvatar(
+                            backgroundColor: _getEmulatorColor(device.emulatorType),
+                            child: Icon(
+                              _getEmulatorIcon(device.emulatorType),
+                              color: Colors.white,
+                            ),
                           ),
                           title: Text(device.name),
-                          subtitle: Text('${device.ip}:${device.port}'),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${device.ip}:${device.port}'),
+                              if (device.emulatorType != EmulatorType.unknown)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _getEmulatorColor(device.emulatorType).withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    device.emulatorType.displayName,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: _getEmulatorColor(device.emulatorType),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
                           trailing: streamingService.isConnecting
                             ? const SizedBox(
                                 width: 20,
@@ -195,7 +295,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                             : const Icon(Icons.chevron_right),
                           onTap: streamingService.isConnecting
                             ? null
-                            : () => _connectToDevice(device),
+                            : () => _showEmulatorSelector(context, device),
                         ),
                       );
                     },
@@ -359,6 +459,125 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 模擬器選擇底部面板
+class _EmulatorSelectorSheet extends StatelessWidget {
+  final DeviceInfo device;
+  final Function(EmulatorType) onConnect;
+
+  const _EmulatorSelectorSheet({
+    required this.device,
+    required this.onConnect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 標題
+          Row(
+            children: [
+              const Icon(Icons.smartphone, size: 28),
+              const SizedBox(width: 12),
+              Text(
+                '選擇模擬器',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '選擇要連接的模擬器類型',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 20),
+
+          // 模擬器列表
+          ...EmulatorType.values
+              .where((e) => e != EmulatorType.unknown)
+              .map((emulator) => _EmulatorListTile(
+                    emulator: emulator,
+                    isSelected: device.emulatorType == emulator,
+                    onTap: () => onConnect(emulator),
+                  )),
+
+          const SizedBox(height: 12),
+
+          // 自動偵測選項
+          ListTile(
+            leading: const CircleAvatar(
+              backgroundColor: Colors.grey,
+              child: Icon(Icons.auto_awesome, color: Colors.white),
+            ),
+            title: const Text('自動偵測'),
+            subtitle: const Text('讓系統自動選擇合適的模擬器'),
+            trailing: device.emulatorType == EmulatorType.unknown
+                ? const Icon(Icons.check, color: Colors.green)
+                : null,
+            onTap: () => onConnect(EmulatorType.unknown),
+          ),
+
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+}
+
+/// 模擬器列表項目
+class _EmulatorListTile extends StatelessWidget {
+  final EmulatorType emulator;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _EmulatorListTile({
+    required this.emulator,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  Color _getColor() {
+    switch (emulator) {
+      case EmulatorType.mumu:
+        return Colors.blue;
+      case EmulatorType.nox:
+        return Colors.purple;
+      case EmulatorType.ldplayer:
+        return Colors.orange;
+      case EmulatorType.bluestacks:
+        return Colors.green;
+      case EmulatorType.genymotion:
+        return Colors.teal;
+      case EmulatorType.memu:
+        return Colors.red;
+      case EmulatorType.koplayer:
+        return Colors.indigo;
+      case EmulatorType.unknown:
+        return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: _getColor(),
+        child: const Icon(Icons.smartphone, color: Colors.white),
+      ),
+      title: Text(emulator.displayName),
+      trailing: isSelected
+          ? const Icon(Icons.check, color: Colors.green)
+          : const Icon(Icons.chevron_right),
+      onTap: onTap,
     );
   }
 }
