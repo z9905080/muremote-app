@@ -207,6 +207,24 @@ async function handleClientMessage(clientId, ws, data) {
         }));
       }
       break;
+
+    case 'set-quality':
+      // 設定畫質
+      if (streamer) {
+        streamer.setQuality(data.quality || '720p');
+        ws.send(JSON.stringify({
+          type: 'quality-changed',
+          quality: data.quality
+        }));
+      }
+      break;
+
+    case 'screenshot':
+      // 請求截圖
+      if (streamer) {
+        await streamer.requestScreenshot(ws);
+      }
+      break;
   }
 }
 

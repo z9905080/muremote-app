@@ -341,10 +341,28 @@ class Streamer {
 
   /**
    * 更新配置
+   * @param {Object} config - { width, height, fps, bitrate, quality }
    */
   updateConfig(config) {
     this.config = { ...this.config, ...config };
     log.info('Stream config updated:', this.config);
+  }
+
+  /**
+   * 設定畫質
+   * @param {string} quality - '720p' | '1080p'
+   */
+  setQuality(quality) {
+    if (quality === '1080p') {
+      this.config.width = 1080;
+      this.config.height = 1920;
+      this.config.bitrate = '4M';
+    } else {
+      this.config.width = 720;
+      this.config.height = 1280;
+      this.config.bitrate = '2M';
+    }
+    log.info('Quality set to:', quality);
   }
 
   /**
@@ -355,6 +373,33 @@ class Streamer {
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify(command));
       }
+    }
+  }
+
+  /**
+   * 請求截圖
+   * @param {WebSocket} ws - 客戶端 WebSocket
+   */
+  async requestScreenshot(ws) {
+    try {
+      const { stdout } = await this.execAdb(
+        `shell screencap -p /sdcard/screenshot.jpg`
+      );
+      
+      // 拉取截圖
+      const { stdout: screenshotData } = await this.execAdb(
+        `pull /sdcard/screenshot.jpg`
+      );
+      
+      // 發送截圖數據
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(Buffer.from([0x02, ...screenshotData]), { binary: true });
+      }
+      
+      log.info('Screenshot sent');
+    } catch (error) {
+      log.error('Screenshot error:', error);
+      ws.send(JSON.stringify({ type: 'error', message: 'Screenshot failed' }));
     }
   }
 }

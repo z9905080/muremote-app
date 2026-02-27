@@ -6,6 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 
+// 簡易日誌函數
+void log(String message) {
+  debugPrint('[StreamingService] $message');
+}
+
 class StreamingService extends ChangeNotifier {
   WebSocket? _ws;
   RTCPeerConnection? _peerConnection;
@@ -33,6 +38,10 @@ class StreamingService extends ChangeNotifier {
 
   // Server URL - 應該從設定中獲取
   String _serverUrl = 'ws://192.168.1.100:8080';
+  
+  // 畫質設定
+  String _quality = '720p';
+  int _fps = 30;
 
   bool get isConnected => _isConnected;
   bool get isConnecting => _isConnecting;
@@ -43,6 +52,7 @@ class StreamingService extends ChangeNotifier {
   Uint8List? get currentFrame => _currentJpegData;
   int get screenWidth => _screenWidth;
   int get screenHeight => _screenHeight;
+  String get quality => _quality;
 
   StreamingService() {
     _initRenderer();
@@ -338,6 +348,39 @@ class StreamingService extends ChangeNotifier {
         return null;
       }
     );
+  }
+
+  /**
+   * 設定畫質
+   * @param quality - '480p' | '720p' | '1080p'
+   */
+  Future<void> setQuality(String quality) async {
+    if (!_isConnected) return;
+    
+    _quality = quality;
+    _ws?.add(jsonEncode({
+      'type': 'set-quality',
+      'quality': quality
+    }));
+    
+    notifyListeners();
+    log.info('Quality changed to: $quality');
+  }
+
+  /**
+   * 設定幀率
+   * @param fps - 24 | 30 | 60
+   */
+  Future<void> setFps(int fps) async {
+    if (!_isConnected) return;
+    
+    _fps = fps;
+    _ws?.add(jsonEncode({
+      'type': 'set-fps',
+      'fps': fps
+    }));
+    
+    notifyListeners();
   }
 
   /**

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
+import '../services/streaming_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -8,6 +9,7 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final authService = context.watch<AuthService>();
+    final streamingService = context.watch<StreamingService>();
 
     return Scaffold(
       appBar: AppBar(
@@ -38,16 +40,31 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.high_quality),
             title: const Text('解析度'),
-            subtitle: const Text('720p (推薦)'),
+            subtitle: Text(streamingService.isConnected 
+              ? streamingService.quality 
+              : '720p (推薦)'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showResolutionDialog(context),
+            onTap: () => _showResolutionDialog(context, streamingService),
           ),
           ListTile(
             leading: const Icon(Icons.speed),
             title: const Text('幀率'),
-            subtitle: const Text('30 fps'),
+            subtitle: Text(streamingService.isConnected 
+              ? '${streamingService.fps} fps' 
+              : '30 fps'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showFpsDialog(context),
+            onTap: () => _showFpsDialog(context, streamingService),
+          ),
+          const Divider(),
+
+          // Server Settings
+          _buildSectionHeader('連線設定'),
+          ListTile(
+            leading: const Icon(Icons.wifi),
+            title: const Text('伺服器位址'),
+            subtitle: const Text('192.168.1.100:8080'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {},
           ),
           const Divider(),
 
@@ -88,7 +105,7 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  void _showResolutionDialog(BuildContext context) {
+  void _showResolutionDialog(BuildContext context, StreamingService service) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -99,17 +116,26 @@ class SettingsScreen extends StatelessWidget {
             ListTile(
               title: const Text('480p'),
               subtitle: const Text('省流量'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                service.setQuality('480p');
+                Navigator.pop(context);
+              },
             ),
             ListTile(
               title: const Text('720p (推薦)'),
               subtitle: const Text('平衡'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                service.setQuality('720p');
+                Navigator.pop(context);
+              },
             ),
             ListTile(
               title: const Text('1080p'),
               subtitle: const Text('高畫質'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                service.setQuality('1080p');
+                Navigator.pop(context);
+              },
             ),
           ],
         ),
@@ -117,7 +143,7 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  void _showFpsDialog(BuildContext context) {
+  void _showFpsDialog(BuildContext context, StreamingService service) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -128,17 +154,26 @@ class SettingsScreen extends StatelessWidget {
             ListTile(
               title: const Text('24 fps'),
               subtitle: const Text('省電'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                service.setFps(24);
+                Navigator.pop(context);
+              },
             ),
             ListTile(
               title: const Text('30 fps (推薦)'),
               subtitle: const Text('平衡'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                service.setFps(30);
+                Navigator.pop(context);
+              },
             ),
             ListTile(
               title: const Text('60 fps'),
               subtitle: const Text('流暢'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                service.setFps(60);
+                Navigator.pop(context);
+              },
             ),
           ],
         ),
