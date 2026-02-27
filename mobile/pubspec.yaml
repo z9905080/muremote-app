@@ -1,0 +1,32 @@
+name: muremote_app
+description: "MuRemote App - Remote control for MuMu Emulator"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  # WebRTC for streaming
+  flutter_webrtc: ^3.27.0
+  # HTTP for API calls
+  http: ^1.1.0
+  # State management
+  provider: ^6.0.5
+  # Storage
+  shared_preferences: ^2.2.0
+  # Get device info
+  device_info_plus: ^9.0.0
+  # Network info
+  network_info_plus: ^5.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

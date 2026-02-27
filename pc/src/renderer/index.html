@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MuRemote PC</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .container {
+      text-align: center;
+      padding: 24px;
+    }
+    
+    .logo {
+      width: 80px;
+      height: 80px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+    
+    .logo svg {
+      width: 48px;
+      height: 48px;
+    }
+    
+    h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+    
+    .pc-id {
+      background: rgba(0,0,0,0.3);
+      padding: 12px 24px;
+      border-radius: 12px;
+      margin: 24px 0;
+      font-size: 20px;
+      letter-spacing: 2px;
+    }
+    
+    .status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #fbbf24;
+    }
+    
+    .status-dot.connected {
+      background: #10b981;
+    }
+    
+    .info {
+      font-size: 14px;
+      opacity: 0.8;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+        <line x1="12" y1="18" x2="12" y2="18"></line>
+      </svg>
+    </div>
+    
+    <h1>MuRemote</h1>
+    <p>PC Client</p>
+    
+    <div class="pc-id">
+      ID: <span id="pc-id">Loading...</span>
+    </div>
+    
+    <div class="status">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">等待連線...</span>
+    </div>
+    
+    <div class="info">
+      請使用手機 APP 掃描或輸入上方 ID 進行連線
+    </div>
+    
+    <div class="info">
+      ADB 狀態: <span id="adb-status">檢查中...</span>
+    </div>
+  </div>
+
+  <script>
+    async function updateInfo() {
+      try {
+        const pcId = await window.electronAPI.getPcId();
+        document.getElementById('pc-id').textContent = pcId;
+        
+        const count = await window.electronAPI.getConnectedCount();
+        const dot = document.getElementById('status-dot');
+        const text = document.getElementById('status-text');
+        
+        if (count > 0) {
+          dot.classList.add('connected');
+          text.textContent = '已連線 (' + count + ')';
+        } else {
+          dot.classList.remove('connected');
+          text.textContent = '等待連線...';
+        }
+        
+        const adbStatus = await window.electronAPI.getAdbStatus();
+        const adbText = document.getElementById('adb-status');
+        
+        if (adbStatus === 'connected') {
+          adbText.textContent = '✓ 已連接模擬器';
+          adbText.style.color = '#10b981';
+        } else if (adbStatus === 'no_devices') {
+          adbText.textContent = '⚠ 未找到模擬器';
+          adbText.style.color = '#fbbf24';
+        } else {
+          adbText.textContent = '✗ 未連接';
+          adbText.style.color = '#ef4444';
+        }
+        
+      } catch (e) {
+        console.error('Error:', e);
+      }
+    }
+    
+    // Update every 2 seconds
+    updateInfo();
+    setInterval(updateInfo, 2000);
+  </script>
+</body>
+</html>

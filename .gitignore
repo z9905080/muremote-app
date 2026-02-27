@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.pubspec.lock
+
+# Build outputs
+build/
+.dart_tool/
+.packages
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+
+# Mobile specific
+*.apk
+*.ipa
+android/
+ios/
+
+# PC specific
+dist/
+out/
