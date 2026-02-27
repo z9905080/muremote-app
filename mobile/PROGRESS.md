@@ -1,6 +1,12 @@
 # MuRemote 開發進度
 
-## 第十次回報 - 21:50 (台北時間 CST)
+## 第十一次回報 - 22:18 (台北時間 CST)
+
+### 當前時間
+- **台北時間**: 2026-02-27 22:18:52 CST (UTC+8)
+- **網路時間**: 已同步 ✅
+
+---
 
 ### 這段時間完成
 
@@ -13,122 +19,114 @@
 #### 功能新增
 - [x] streaming_service.dart - 新增 `setServerUrl()` 方法
 - [x] settings_screen.dart - 新增伺服器位址編輯功能
-
-#### 技術改進
-- 480p 畫質支援 (節省流量)
-- 截圖功能穩定性提升
-- 伺服器 URL 可從設定頁面修改
+- [x] 480p 畫質支援 (節省流量)
+- [x] 截圖功能穩定性提升
 
 ---
 
-## 歷史版本
+## 專案架構
 
-## 第九回報 - 21:33 (台北時間 CST)
+```
+MuRemote/
+├── mobile/                    # Flutter 手機 App
+│   ├── lib/
+│   │   ├── screens/           # 4 個畫面
+│   │   │   ├── home_screen.dart
+│   │   │   ├── connection_screen.dart
+│   │   │   ├── streaming_screen.dart
+│   │   │   └── settings_screen.dart
+│   │   ├── services/          # 核心服務
+│   │   │   ├── streaming_service.dart   # WebSocket 串流
+│   │   │   ├── discovery_service.dart   # mDNS 發現
+│   │   │   ├── webrtc_service.dart      # WebRTC
+│   │   │   └── auth_service.dart         # 認證
+│   │   └── main.dart
+│   └── pubspec.yaml
+│
+└── pc/                        # Electron PC Client
+    ├── src/
+    │   ├── main/              # 主程序
+    │   │   ├── main.js              # 入口點
+    │   │   ├── streamer.js          # 螢幕串流
+    │   │   ├── touch_handler.js     # 觸控處理
+    │   │   ├── device_manager.js    # ADB 設備管理
+    │   │   ├── mdns_advertiser.js    # mDNS 服務廣播
+    │   │   ├── screen_capture.js    # 螢幕擷取
+    │   │   ├── keyboard_handler.js  # 鍵盤處理
+    │   │   ├── multi_touch_handler.js # 多點觸控
+    │   │   └── signaling_server.js  # WebRTC 訊號伺服器
+    │   ├── preload/
+    │   └── renderer/
+    └── package.json
+```
 
-### 這段時間完成
+---
 
-#### PC Client (Electron)
-- [x] 主程序架構 (main.js) - ADB 連線、WebSocket 伺服器、系統匣
-- [x] 螢幕串流模組 (streamer.js) - **重構優化**
-  - 新增 scrcpy 檢測，首選使用 scrcpy 協議
-  - 備用方案: FFmpeg + ADB screenrecord
-  - 新增 MJPEG 編碼優化
-  - 添加統計信息廣播 (FPS、延遲)
-- [x] 觸控處理模組 (touch_handler.js) - 觸控事件轉 ADB input
-- [x] 設備管理 (device_manager.js)
-- [x] 系統 Tray 整合
-- [x] WebSocket 通訊协议 - 支援 touch/key/text/start-stream/stop-stream
+## 功能狀態總覽
 
-#### 手機端 (Flutter)
-- [x] 專案架構 - Provider 狀態管理
-- [x] 串流服務 (streaming_service.dart) - **重大更新**
-  - 新增 JPEG 幀解碼顯示
-  - 支援觸控事件 (down/move/up)
-  - 新增文字輸入對話框
-  - 新增截圖請求功能
-  - 改進 WebSocket 二進制幀處理
-- [x] WebRTC 服務框架 (webrtc_service.dart)
-- [x] 認證服務 (auth_service.dart)
-- [x] 4 個畫面 - Home/Connection/Settings/Streaming
-- [x] 串流畫面 (streaming_screen.dart) - **重大更新**
-  - 改用 Image.memory 顯示 JPEG 幀
-  - 新增完整觸控手勢支援 (拖曳、滑動)
-  - 新增鍵盤快捷按鈕
-  - 新增文字輸入對話框
-  - 顯示即時狀態 (FPS/延遲/解析度)
-
-#### 系統整合
-- [x] WebSocket 二進制影片傳輸
-- [x] 觸控座標映射 (0-1 歸一化)
-- [x] 螢幕大小協商
-
-### 當前狀態
-
-| 模組 | 狀態 | 備註 |
+### 已實現 ✅
+| 功能 | 說明 | 狀態 |
 |------|------|------|
-| ADB 連線 | ✅ | 連接 MuMu port 7555 |
-| 螢幕串流 | ✅ | scrcpy 優先 / FFmpeg 備用 |
-| 觸控回傳 | ✅ | PC + 手機端完成 |
-| 畫質調整 | ✅ | 480p/720p/1080p 支援 |
-| 幀率調整 | ✅ | 24/30/60 fps 支援 |
-| 截圖功能 | ✅ | requestScreenshot |
+| 遠端連線 | 手機 → 電腦 MuMu 模擬器連線 | ✅ |
+| 螢幕串流 | 電腦畫面傳輸到手機 (scrcpy/FFmpeg) | ✅ |
+| 觸控映射 | 觸控操作轉換為滑鼠點擊/滑動 | ✅ |
+| 畫質調整 | 480p / 720p / 1080p 選擇 | ✅ |
+| 幀率調整 | 24 / 30 / 60 fps 支援 | ✅ |
+| 連線狀態指示 | 顯示延遲、幀率 | ✅ |
+| 截圖功能 | 即時截圖 | ✅ |
+| 鍵盤輸入 | 虛擬鍵盤 + 快捷鍵 | ✅ |
+| 自動發現 | mDNS/Bonjour 設備搜尋 | ✅ |
+| 伺服器設定 | 可自訂伺服器位址 | ✅ |
 
-### 本次更新內容 (第九回)
+### 待完成 🚧
+| 功能 | 說明 | 狀態 |
+|------|------|------|
+| 端對端連線測試 | 實際 MuMu 環境測試 | 🚧 |
+| 多點觸控支援 | 複雜手勢操作 | 🚧 |
+| 連線狀態顯示優化 | 更好的錯誤處理 | 🚧 |
 
-**streaming_service.dart 新增方法:**
-- `setQuality(quality)` - 設定解析度 (480p/720p/1080p)
-- `setFps(fps)` - 設定幀率 (24/30/60)
-- `quality` getter - 取得當前畫質
-- `requestScreenshot()` - 請求截圖
+### 未來規劃 📋
+| 功能 | 說明 |
+|------|------|
+| 多開同步控制 | 同時控制多個模擬器 |
+| 4K 畫質 | 高畫質傳輸 |
+| 虛擬鍵盤 | 完整鍵盤映射 |
 
-**streamer.js 新增方法:**
-- `setQuality(quality)` - PC 端畫質設定
-- `requestScreenshot(ws)` - 截圖處理
-- `updateConfig(config)` - 串流配置更新
+---
 
-**通訊協議擴展:**
+## 通訊協議
+
+### 手機 → PC 訊息
 ```json
+{ "type": "touch", "action": "down", "x": 0.5, "y": 0.5 }
+{ "type": "touch", "action": "move", "x": 0.6, "y": 0.6 }
+{ "type": "touch", "action": "up" }
+{ "type": "key", "key": "BACK" }
+{ "type": "text", "text": "hello" }
 { "type": "set-quality", "quality": "720p" }
 { "type": "set-fps", "fps": 30 }
 { "type": "screenshot" }
 ```
 
-### 技術改進
+### PC → 手機訊息
+```json
+{ "type": "stream-start", "width": 1280, "height": 720 }
+{ "type": "stream-frame", "data": "<jpeg-bytes>" }
+{ "type": "stats", "fps": 30, "latency": 50 }
+{ "type": "screenshot-data", "data": "<jpeg-bytes>" }
+```
 
-**串流架構優化:**
+---
+
+## 技術架構
+
+### 串流架構
 ```
 方案1 (首選): MuMu → scrcpy → 手機 (最低延遲)
 方案2 (備用): MuMu → ADB screenrecord → FFmpeg (MJPEG) → 手機
 ```
 
-**手機端顯示:**
-- 使用 Image.memory() 配合 gaplessPlayback
-- 即時 JPEG 解碼顯示
-- 即時 FPS/延遲統計
-
-### 遇到的問題
-1. **串流延遲** - scrcpy 協議如可用則延遲極低
-2. **格式轉換** - FFmpeg MJPEG 方案已優化
-3. **需要測試** - 實際 MuMu 環境測試
-
-### 下一步優先順序
-
-#### P0 - 必須完成
-1. [ ] 實際環境測試 (需要 MuMu 模擬器)
-2. [ ] 端對端連線測試
-
-#### P1 - 重要
-3. [ ] 連線狀態顯示優化
-4. [ ] 多點觸控支援
-5. [ ] 鍵盤映射完整支援
-
-#### P2 - 未來規劃
-6. [ ] 多開同步控制
-7. [ ] 橫屏遊戲支援
-
-### 技術筆記
-
-**數據流優化:**
+### 數據流
 ```
 觸控數據流:
 手機觸控 (0-1 座標)
@@ -142,7 +140,25 @@ MuMu 模擬器
 
 ---
 
+## 下一步優先順序
+
+### P0 - 必須完成
+1. [ ] 實際環境測試 (需要 MuMu 模擬器)
+2. [ ] 端對端連線測試
+
+### P1 - 重要
+3. [ ] 連線狀態顯示優化
+4. [ ] 多點觸控支援
+
+### P2 - 未來規劃
+5. [ ] 多開同步控制
+6. [ ] 橫屏遊戲支援
+
+---
+
 ## 歷史版本
+
+- 第十回報 (21:50) - 修復變數問題，新增伺服器 URL 設定
 - 第九回報 (21:33) - 完成畫質/幀率/截圖功能
 - 第八回報 (21:18) - 完成基礎串流模組
 - 第六回報 (12:59) - 完成基礎串流模組
