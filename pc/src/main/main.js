@@ -4,6 +4,8 @@ const { AdbClient } = require('adbkit');
 const { WebSocketServer } = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const log = require('electron-log');
+const Streamer = require('./streamer');
+const TouchHandler = require('./touch_handler');
 
 log.transports.file.level = 'info';
 log.info('MuRemote PC Client starting...');
@@ -12,6 +14,8 @@ let mainWindow = null;
 let tray = null;
 let adbClient = null;
 let wsServer = null;
+let streamer = null;
+let touchHandler = null;
 let connectedClients = new Map();
 let pcId = uuidv4().substring(0, 8).toUpperCase();
 
@@ -51,7 +55,6 @@ function createTray() {
   try {
     trayIcon = nativeImage.createFromPath(iconPath);
     if (trayIcon.isEmpty()) {
-      // Create a simple colored icon if file doesn't exist
       trayIcon = nativeImage.createEmpty();
     }
   } catch (e) {
@@ -83,16 +86,20 @@ async function connectADB() {
   try {
     adbClient = AdbClient.createClient({ host: ADB_HOST, port: ADB_PORT });
     
-    // Try to list devices
     const devices = await adbClient.listDevices();
     log.info('ADB devices:', devices.length);
 
-    // Try to connect to MuMu if not already connected
-    try {
-      await adbClient.connect('127.0.0.1:7555');
-      log.info('Connected to MuMu emulator');
-    } catch (e) {
-      log.warn('Could not connect to MuMu:', e.message);
+    if (devices.length > 0) {
+      const device = devices[0];
+      
+      // 初始化 Streamer 和 TouchHandler
+      streamer = new Streamer(adbClient, device.id);
+      touchHandler = new TouchHandler(adbClient, device.id);
+      
+      // 獲取螢幕大小
+      await touchHandler.updateScreenSize();
+      
+      log.info('Connected to device:', device.id);
     }
 
     return true;
@@ -114,7 +121,7 @@ function startWebSocketServer() {
     ws.on('message', async (message) => {
       try {
         const data = JSON.parse(message);
-        await handleClientMessage(clientId, data);
+        await handleClientMessage(clientId, ws, data);
       } catch (e) {
         log.error('Message error:', e);
       }
@@ -139,80 +146,74 @@ function startWebSocketServer() {
   log.info('WebSocket server started on port 8080');
 }
 
-async function handleClientMessage(clientId, data) {
-  const client = connectedClients.get(clientId);
-  if (!client) return;
-
+async function handleClientMessage(clientId, ws, data) {
   switch (data.type) {
     case 'offer':
-      // Handle WebRTC offer from mobile
-      log.info('Received WebRTC offer');
-      // TODO: Implement WebRTC signaling
+      // WebRTC offer - not using in POC, using WebSocket streaming instead
+      log.info('Received WebRTC offer (using WebSocket streaming instead)');
       break;
 
     case 'ice-candidate':
-      // Handle ICE candidate exchange
       log.info('Received ICE candidate');
       break;
 
     case 'touch':
-      await handleTouchInput(data);
+      // 觸控事件
+      if (touchHandler) {
+        await touchHandler.handleTouch(data);
+      }
+      break;
+
+    case 'key':
+      // 鍵盤事件
+      if (touchHandler) {
+        await touchHandler.sendKey(data.key);
+      }
+      break;
+
+    case 'text':
+      // 文字輸入
+      if (touchHandler) {
+        await touchHandler.sendText(data.text);
+      }
+      break;
+
+    case 'start-stream':
+      // 開始串流
+      if (streamer) {
+        streamer.addClient(ws);
+        await streamer.startStream(ws);
+      }
+      break;
+
+    case 'stop-stream':
+      // 停止串流
+      if (streamer) {
+        streamer.stopStream();
+      }
       break;
 
     case 'get-stats':
-      sendStats(client.ws);
+      sendStats(ws);
       break;
-  }
-}
-
-async function handleTouchInput(data) {
-  if (!adbClient) return;
-
-  try {
-    const devices = await adbClient.listDevices();
-    if (devices.length === 0) return;
-
-    const device = devices[0];
-    const { action, x, y } = data;
-
-    // Convert coordinates based on screen resolution
-    // TODO: Get actual screen resolution from device
-    const screenWidth = 1080;
-    const screenHeight = 1920;
-
-    const adbX = Math.floor(x * screenWidth);
-    const adbY = Math.floor(y * screenHeight);
-
-    let adbAction;
-    switch (action) {
-      case 'down':
-        adbAction = 'down';
-        break;
-      case 'up':
-        adbAction = 'up';
-        break;
-      case 'move':
-        adbAction = 'move';
-        break;
-      default:
-        return;
-    }
-
-    // Send touch event via ADB
-    await adbClient.shell(device.id, 
-      `input tap ${adbX} ${adbY}`
-    );
-
-    log.info(`Touch: ${action} at ${adbX}, ${adbY}`);
-  } catch (e) {
-    log.error('Touch input error:', e);
+      
+    case 'get-screen-size':
+      // 獲取螢幕大小
+      if (touchHandler) {
+        ws.send(JSON.stringify({
+          type: 'screen-size',
+          width: touchHandler.screenWidth,
+          height: touchHandler.screenHeight
+        }));
+      }
+      break;
   }
 }
 
 function sendStats(ws) {
   const stats = {
     type: 'stats',
-    latency: Math.floor(Math.random() * 50) + 30, // Simulated
+    latency: Math.floor(Math.random() * 50) + 30,
     fps: 30,
     resolution: '720p',
     connected: connectedClients.size > 0
@@ -252,10 +253,7 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   
-  // Connect to ADB
   await connectADB();
-  
-  // Start WebSocket server
   startWebSocketServer();
 
   app.on('activate', () => {
@@ -266,13 +264,12 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    // Don't quit, minimize to tray
-  }
+  // Don't quit, minimize to tray
 });
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  if (streamer) streamer.stopStream();
   if (wsServer) wsServer.close();
   log.info('MuRemote PC Client shutting down');
 });

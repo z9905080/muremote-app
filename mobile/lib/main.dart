@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'services/webrtc_service.dart';
+import 'services/streaming_service.dart';
 import 'services/auth_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/connection_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/streaming_screen.dart';
 
 void main() {
   runApp(const MuRemoteApp());
@@ -19,6 +21,7 @@ class MuRemoteApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthService()),
         ChangeNotifierProvider(create: (_) => WebRTCService()),
+        ChangeNotifierProvider(create: (_) => StreamingService()),
       ],
       child: MaterialApp(
         title: 'MuRemote',
@@ -30,6 +33,7 @@ class MuRemoteApp extends StatelessWidget {
         routes: {
           '/connect': (context) => const ConnectionScreen(),
           '/settings': (context) => const SettingsScreen(),
+          '/stream': (context) => const StreamingScreen(),
         },
       ),
     );

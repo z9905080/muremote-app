@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/webrtc_service.dart';
+import '../services/streaming_service.dart';
 
 class ConnectionScreen extends StatefulWidget {
   const ConnectionScreen({super.key});
@@ -11,16 +12,18 @@ class ConnectionScreen extends StatefulWidget {
 
 class _ConnectionScreenState extends State<ConnectionScreen> {
   final _pcIdController = TextEditingController();
+  final _ipController = TextEditingController(text: '192.168.1.100');
   
   @override
   void dispose() {
     _pcIdController.dispose();
+    _ipController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final webrtcService = context.watch<WebRTCService>();
+    final streamingService = context.watch<StreamingService>();
 
     return Scaffold(
       appBar: AppBar(
@@ -36,12 +39,12 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: webrtcService.isConnected 
+                color: streamingService.isConnected 
                   ? Colors.green.shade50 
                   : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: webrtcService.isConnected 
+                  color: streamingService.isConnected 
                     ? Colors.green.shade200 
                     : Colors.grey.shade300,
                 ),
@@ -49,27 +52,27 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               child: Row(
                 children: [
                   Icon(
-                    webrtcService.isConnected 
+                    streamingService.isConnected 
                       ? Icons.check_circle 
                       : Icons.circle_outlined,
-                    color: webrtcService.isConnected 
+                    color: streamingService.isConnected 
                       ? Colors.green 
                       : Colors.grey,
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    webrtcService.isConnected ? '已連線' : '未連線',
+                    streamingService.isConnected ? '已連線' : '未連線',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: webrtcService.isConnected 
+                      color: streamingService.isConnected 
                         ? Colors.green.shade700 
                         : Colors.grey.shade700,
                     ),
                   ),
                   const Spacer(),
-                  if (webrtcService.isConnected)
+                  if (streamingService.isConnected)
                     Text(
-                      '${webrtcService.latency}ms',
+                      '${streamingService.latency}ms',
                       style: TextStyle(color: Colors.grey.shade600),
                     ),
                 ],
@@ -77,9 +80,30 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
             ),
             const SizedBox(height: 32),
 
-            // PC ID Input
+            // PC IP Input
             Text(
-              '輸入電腦 ID',
+              '電腦 IP 位址',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _ipController,
+              decoration: InputDecoration(
+                hintText: '例如: 192.168.1.100',
+                prefixIcon: const Icon(Icons.wifi),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 16),
+
+            // PC ID Input (Optional)
+            Text(
+              '電腦 ID (可選)',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -95,13 +119,6 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 16),
-
-            // Quick Connect Info
-            Text(
-              '或從電腦端取得 ID',
-              style: TextStyle(color: Colors.grey.shade600),
-            ),
             const SizedBox(height: 24),
 
             // Connect Button
@@ -109,14 +126,25 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               width: double.infinity,
               height: 56,
               child: ElevatedButton.icon(
-                onPressed: webrtcService.isConnecting
+                onPressed: streamingService.isConnecting
                   ? null
-                  : () {
-                      if (_pcIdController.text.isNotEmpty) {
-                        webrtcService.connect(_pcIdController.text);
+                  : () async {
+                      final ip = _ipController.text.trim();
+                      if (ip.isNotEmpty) {
+                        await streamingService.connect(
+                          _pcIdController.text.trim().isEmpty 
+                            ? ip 
+                            : _pcIdController.text.trim(),
+                          serverUrl: 'ws://$ip:8080',
+                        );
+                        
+                        if (streamingService.isConnected && context.mounted) {
+                          // 導航到串流頁面
+                          Navigator.pushNamed(context, '/stream');
+                        }
                       }
                     },
-                icon: webrtcService.isConnecting
+                icon: streamingService.isConnecting
                   ? const SizedBox(
                       width: 20,
                       height: 20,
@@ -127,7 +155,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                     )
                   : const Icon(Icons.link),
                 label: Text(
-                  webrtcService.isConnecting ? '連線中...' : '開始連線',
+                  streamingService.isConnecting ? '連線中...' : '開始連線',
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue.shade700,
@@ -141,51 +169,40 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
             const Spacer(),
 
-            // Quality Info
-            if (webrtcService.isConnected)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildQualityItem('解析度', webrtcService.resolution),
-                        _buildQualityItem('幀率', '${webrtcService.fps} fps'),
-                        _buildQualityItem('延遲', '${webrtcService.latency}ms'),
-                      ],
-                    ),
-                  ],
-                ),
+            // Instructions
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(12),
               ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.blue.shade700),
+                      const SizedBox(width: 8),
+                      Text(
+                        '連線說明',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('1. 確保手機和電腦在同一個 WiFi 網路'),
+                  const Text('2. 在電腦上執行 MuRemote PC Client'),
+                  const Text('3. 輸入電腦的 IP 位址'),
+                  const Text('4. 點擊連線開始遠端控制'),
+                ],
+              ),
+            ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildQualityItem(String label, String value) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
-        ),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.grey.shade600,
-            fontSize: 12,
-          ),
-        ),
-      ],
     );
   }
 }
