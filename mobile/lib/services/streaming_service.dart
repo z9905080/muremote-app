@@ -377,7 +377,7 @@ class StreamingService extends ChangeNotifier {
 
   /**
    * 設定畫質
-   * @param quality - '480p' | '720p' | '1080p'
+   * @param quality - '480p' | '720p' | '1080p' | '4K'
    */
   Future<void> setQuality(String quality) async {
     if (!_isConnected) return;

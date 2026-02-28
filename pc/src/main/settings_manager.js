@@ -25,6 +25,8 @@ class SettingsManager {
         fps: 30,
         bitrate: 2000000,
         codec: 'h264',
+        // 支援的解析度選項
+        supportedQualities: ['480p', '720p', '1080p', '4K'],
       },
       
       // 網路設定

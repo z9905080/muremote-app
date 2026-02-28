@@ -170,6 +170,14 @@ class SettingsScreen extends StatelessWidget {
                 Navigator.pop(context);
               },
             ),
+            ListTile(
+              title: const Text('4K'),
+              subtitle: const Text('超高畫質 (需要高頻寬)'),
+              onTap: () {
+                service.setQuality('4K');
+                Navigator.pop(context);
+              },
+            ),
           ],
         ),
       ),
