@@ -9,6 +9,7 @@ const TouchHandler = require('./touch_handler');
 const MultiTouchHandler = require('./multi_touch_handler');
 const MdnsAdvertiser = require('./mdns_advertiser');
 const DeviceManager = require('./device_manager');
+const MultiInstanceManager = require('./multi_instance_manager');
 const ReconnectionManager = require('./reconnection_manager');
 const config = require('../config');
 
@@ -24,6 +25,7 @@ let touchHandler = null;
 let multiTouchHandler = null;
 let mdnsAdvertiser = null;
 let deviceManager = null;
+let multiInstanceManager = null;
 let reconnectionManager = null;
 let connectedClients = new Map();
 let pcId = uuidv4().substring(0, 8).toUpperCase();
@@ -95,6 +97,9 @@ async function connectADB() {
   try {
     // 使用 DeviceManager 進行設備管理
     deviceManager = new DeviceManager();
+    
+    // 初始化多開同步管理器
+    multiInstanceManager = new MultiInstanceManager(deviceManager);
     
     // 初始化並連接模擬器
     const connected = await deviceManager.initialize();
@@ -402,6 +407,84 @@ async function handleClientMessage(clientId, ws, data) {
         await streamer.requestScreenshot(ws);
       }
       break;
+
+    // Multi-instance sync handlers
+    case 'get-devices':
+      // 獲取所有可用設備
+      if (deviceManager) {
+        await deviceManager.refreshDevices();
+        ws.send(JSON.stringify({
+          type: 'devices-list',
+          devices: deviceManager.devices
+        }));
+      }
+      break;
+
+    case 'get-multi-status':
+      // 獲取多開同步狀態
+      if (multiInstanceManager) {
+        ws.send(JSON.stringify({
+          type: 'multi-status',
+          status: multiInstanceManager.getStatus()
+        }));
+      }
+      break;
+
+    case 'sync-touch':
+      // 執行同步觸控
+      if (multiInstanceManager) {
+        const result = await multiInstanceManager.executeSyncTouch(data);
+        ws.send(JSON.stringify({
+          type: 'sync-result',
+          result: result
+        }));
+      }
+      break;
+
+    case 'sync-enable':
+      // 啟用同步控制
+      if (multiInstanceManager) {
+        const success = multiInstanceManager.enableSync();
+        ws.send(JSON.stringify({
+          type: 'sync-enabled',
+          success: success
+        }));
+      }
+      break;
+
+    case 'sync-disable':
+      // 停用同步控制
+      if (multiInstanceManager) {
+        multiInstanceManager.disableSync();
+        ws.send(JSON.stringify({
+          type: 'sync-disabled',
+          success: true
+        }));
+      }
+      break;
+
+    case 'select-sync-device':
+      // 選擇同步設備
+      if (multiInstanceManager && data.deviceId) {
+        const success = multiInstanceManager.selectDevice(data.deviceId);
+        ws.send(JSON.stringify({
+          type: 'device-selection',
+          deviceId: data.deviceId,
+          success: success
+        }));
+      }
+      break;
+
+    case 'select-all-sync-devices':
+      // 選擇全部設備
+      if (multiInstanceManager) {
+        multiInstanceManager.selectAllDevices();
+        ws.send(JSON.stringify({
+          type: 'all-devices-selected',
+          count: multiInstanceManager.selectedDevices.size
+        }));
+      }
+      break;
   }
 }
 
@@ -442,6 +525,61 @@ ipcMain.handle('get-adb-status', async () => {
   } catch (e) {
     return 'error';
   }
+});
+
+// Multi-instance handlers
+ipcMain.handle('get-devices', async () => {
+  if (!deviceManager) return [];
+  await deviceManager.refreshDevices();
+  return deviceManager.devices;
+});
+
+ipcMain.handle('get-multi-instance-status', () => {
+  if (!multiInstanceManager) return null;
+  return multiInstanceManager.getStatus();
+});
+
+ipcMain.handle('select-device', (event, deviceId) => {
+  if (!multiInstanceManager) return false;
+  return multiInstanceManager.selectDevice(deviceId);
+});
+
+ipcMain.handle('deselect-device', (event, deviceId) => {
+  if (!multiInstanceManager) return false;
+  return multiInstanceManager.deselectDevice(deviceId);
+});
+
+ipcMain.handle('toggle-device', (event, deviceId) => {
+  if (!multiInstanceManager) return false;
+  return multiInstanceManager.toggleDevice(deviceId);
+});
+
+ipcMain.handle('select-all-devices', () => {
+  if (!multiInstanceManager) return false;
+  multiInstanceManager.selectAllDevices();
+  return true;
+});
+
+ipcMain.handle('clear-device-selection', () => {
+  if (!multiInstanceManager) return false;
+  multiInstanceManager.clearSelection();
+  return true;
+});
+
+ipcMain.handle('enable-sync', () => {
+  if (!multiInstanceManager) return false;
+  return multiInstanceManager.enableSync();
+});
+
+ipcMain.handle('disable-sync', () => {
+  if (!multiInstanceManager) return false;
+  multiInstanceManager.disableSync();
+  return true;
+});
+
+ipcMain.handle('toggle-sync', () => {
+  if (!multiInstanceManager) return false;
+  return multiInstanceManager.toggleSync();
 });
 
 app.whenReady().then(async () => {
