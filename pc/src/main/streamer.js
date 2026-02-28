@@ -377,21 +377,29 @@ class Streamer {
 
   /**
    * 設定畫質
-   * @param {string} quality - '720p' | '1080p'
+   * @param {string} quality - '480p' | '720p' | '1080p' | '4K'
    */
   setQuality(quality) {
-    if (quality === '1080p') {
+    if (quality === '4K') {
+      this.config.width = 2160;
+      this.config.height = 3840;
+      this.config.bitrate = '20M'; // 4K 需要更高的位元率
+      this.config.quality = 80;
+    } else if (quality === '1080p') {
       this.config.width = 1080;
       this.config.height = 1920;
       this.config.bitrate = '3M'; // 降低位元率以減少延遲
+      this.config.quality = 60;
     } else if (quality === '480p') {
       this.config.width = 480;
       this.config.height = 854;
       this.config.bitrate = '1M';
+      this.config.quality = 50;
     } else {
       this.config.width = 720;
       this.config.height = 1280;
       this.config.bitrate = '2M';
+      this.config.quality = 60;
     }
     log.info('Quality set to:', quality);
   }
