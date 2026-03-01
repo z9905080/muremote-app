@@ -5,7 +5,8 @@ const util = require('util');
 const { AdbClient } = require('adbkit');
 const { WebSocketServer } = require('ws');
 const { v4: uuidv4 } = require('uuid');
-const log = require('electron-log');
+const log = require('electron-log/main');
+log.initialize();
 const Streamer = require('./streamer');
 const TouchHandler = require('./touch_handler');
 const MultiTouchHandler = require('./multi_touch_handler');
@@ -17,15 +18,15 @@ const config = require('../config');
 
 log.transports.file.level = 'info';
 
-// 將 log 轉發到 renderer 供 UI 顯示
-log.hooks.push((message, transport, transportName) => {
+// 自訂 transport：將 log 轉發到 renderer 供 UI 顯示
+log.transports.ipc = (msg) => {
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-    const time = message.date.toLocaleTimeString('zh-TW', { hour12: false });
-    const text = message.data.map(d => typeof d === 'object' ? util.inspect(d) : String(d)).join(' ');
-    mainWindow.webContents.send('app-log', { level: message.level, time, text });
+    const time = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    const text = msg.data.map(d => typeof d === 'object' ? util.inspect(d) : String(d)).join(' ');
+    mainWindow.webContents.send('app-log', { level: msg.level, time, text });
   }
-  return message;
-});
+};
+log.transports.ipc.level = 'info';
 
 // 攔截 stdout/stderr，統一轉發到 electron-log（寫檔 + UI）
 // 用 flag 避免 log 本身寫 stdout 造成無限迴圈
