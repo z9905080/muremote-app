@@ -27,6 +27,32 @@ log.hooks.push((message, transport, transportName) => {
   return message;
 });
 
+// 攔截 stdout/stderr，統一轉發到 electron-log（寫檔 + UI）
+// 用 flag 避免 log 本身寫 stdout 造成無限迴圈
+let _logIntercepting = false;
+const _origStdoutWrite = process.stdout.write.bind(process.stdout);
+const _origStderrWrite = process.stderr.write.bind(process.stderr);
+
+process.stdout.write = (chunk, encoding, callback) => {
+  if (!_logIntercepting) {
+    _logIntercepting = true;
+    const text = chunk.toString().trimEnd();
+    if (text) log.info(text);
+    _logIntercepting = false;
+  }
+  return _origStdoutWrite(chunk, encoding, callback);
+};
+
+process.stderr.write = (chunk, encoding, callback) => {
+  if (!_logIntercepting) {
+    _logIntercepting = true;
+    const text = chunk.toString().trimEnd();
+    if (text) log.error(text);
+    _logIntercepting = false;
+  }
+  return _origStderrWrite(chunk, encoding, callback);
+};
+
 log.info('MuRemote PC Client starting...');
 
 let mainWindow = null;
