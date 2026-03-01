@@ -1,8 +1,8 @@
 # MuRemote 開發進度回報
 
 ## 執行時間
-- **台北時間 (UTC+8)**: 2026-03-01 15:34
-- **UTC**: 2026-03-01 07:34
+- **台北時間 (UTC+8)**: 2026-03-01 16:20
+- **UTC**: 2026-03-01 08:20
 
 ---
 
@@ -10,8 +10,8 @@
 
 ### Remote 同步 ✅
 - 已執行 `git fetch --all`
-- 本地分支 master 與 origin/master 同步
-- 所有 feature 分支已合併至 master
+- 本地分支落後 origin/master 1個 commit，已執行 `git pull` 同步
+- 最新 commit: `c4e716f fix: 修正 tray icon 缺失、補 X 關閉提示、修正 ADB 假連線 log`
 
 ### Issue 檢查 ✅
 - Open Issues: 0 個 (全部已關閉)
@@ -21,51 +21,47 @@
 
 ---
 
+## 本次同步內容
+
+### Pulled Changes (c4e716f):
+- 新增 `pc/src/main/assets/icon.png` (2021 bytes) - 修正 tray icon 無法顯示問題
+- 更新 `pc/src/main/device_manager.js` - 9 行變更
+- 更新 `pc/src/main/main.js` - 102 行變更
+- 更新 `pc/src/main/mdns_advertiser.js` - 17 行變更
+
+### 修復項目:
+1. Tray icon 缺失問題 - 新增 icon.png 資源
+2. X 關閉視窗提示 - 首次關閉時顯示 balloon 通知說明 app 最小化到系統匣
+3. ADB 連線訊息優化 - connectDevice() 改為檢查 adb connect 輸出，失敗時不再顯示「已連接」誤導訊息
+
+---
+
 ## Project Board 狀態
 
 | 狀態 | 項目 |
 |------|------|
-| Done | PR #6: Latency optimization |
+| Done | PR #15: 修正 tray icon 缺失、補 X 關閉提示、修正 ADB 假連線 log |
+| Done | PR #14: 4K 高畫質支援 |
+| Done | PR #13: 多開同步控制 |
 | Done | PR #12: 虛擬鍵盤優化 |
-| Done | Issue #7: 延遲優化測試與驗證 |
-| Done | Issue #9: 多開同步控制 (PR #13) |
-| Done | Issue #10: 虛擬鍵盤優化 (PR #12) |
-| Done | Issue #11: 高畫質 (4K) 支援 (PR #14) |
+| Done | PR #6: Latency optimization |
 
 ---
 
-## 本次開發成果 (近期完成)
+## 結論
 
-### Phase 2/3 已完成 ✅
-
-1. **Issue #10 - 虛擬鍵盤優化** (PR #12)
-   - 新增 30+ 鍵盤快捷鍵映射
-   - 新增多鍵快捷鍵與優化響應速度
-   - 新增 `sendTextOptimized()` 方法
-
-2. **Issue #9 - 多開同步控制** (PR #13)
-   - 新增 MultiInstanceManager 類別
-   - 支援多模擬器同步操作
-
-3. **Issue #11 - 高畫質 (4K) 支援** (PR #14)
-   - 新增 4K 高畫質支援
+專案處於**穩定完成狀態**：
+- 所有功能已實現 (4K、 多開同步、虛擬鍵盤、延遲優化)
+- 最新版本修復了 tray icon 與 ADB 連線訊息問題
+- 無 pending 開發項目
 
 ---
 
-## 待處理事項
+## 下一步
 
-目前專案處於**已完成狀態**：
-- 所有規劃的功能皆已完成
-- 所有 PR 已合併
-- 無 pending 的開發項目
-
----
-
-## 下一步建議
-
-1. 監控上線後的使用狀況
+1. 持續監控使用狀況
 2. 收集用戶回饋
-3. 規劃下一階段功能
+3. 規劃未來新功能
 
 ---
 
