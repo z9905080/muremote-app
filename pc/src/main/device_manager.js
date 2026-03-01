@@ -92,6 +92,7 @@ class DeviceManager {
     this.emulatorType = null; // 手動設置的模擬器類型
     this.adbAvailable = false; // ADB 是否可用
     this.adbVersion = ''; // ADB 版本字串
+    this.enabledEmulators = Object.keys(EMULATOR_CONFIGS); // 預設全部啟用
   }
 
   /**
@@ -273,8 +274,9 @@ class DeviceManager {
         }
       }
     } else {
-      // 自動發現所有支持的模擬器
+      // 自動發現已啟用的模擬器
       for (const [type, config] of Object.entries(EMULATOR_CONFIGS)) {
+        if (!this.enabledEmulators.includes(type)) continue;
         for (const host of hosts) {
           for (const port of config.ports) {
             const key = `${host}:${port}`;
@@ -647,3 +649,4 @@ class DeviceManager {
 }
 
 module.exports = DeviceManager;
+module.exports.EMULATOR_CONFIGS = EMULATOR_CONFIGS;

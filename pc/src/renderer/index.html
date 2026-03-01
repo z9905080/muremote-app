@@ -148,7 +148,57 @@
       color: #6b7280;
       font-size: 12px;
     }
+
+    #qr-image {
+      display: block;
+      margin: 0 auto;
+      border-radius: 8px;
+    }
     
+    .emulator-section {
+      margin-top: 16px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .emulator-toggle {
+      width: 100%;
+      padding: 10px 16px;
+      background: transparent;
+      border: none;
+      color: white;
+      cursor: pointer;
+      font-size: 13px;
+      text-align: left;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .emulator-toggle:hover { background: rgba(255,255,255,0.05); }
+
+    .emulator-list {
+      display: none;
+      padding: 4px 12px 12px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .emulator-list.show { display: flex; }
+
+    .emulator-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 13px;
+      user-select: none;
+    }
+    .emulator-item:hover { background: rgba(255,255,255,0.2); }
+    .emulator-item input[type="checkbox"] { cursor: pointer; width: 15px; height: 15px; }
+
     .log-toggle {
       margin-top: 16px;
       padding: 8px 16px;
@@ -230,9 +280,8 @@
     
     <div class="qr-section">
       <p style="color: #374151; margin-bottom: 12px; font-weight: bold;">手機掃描連線</p>
-      <div class="qr-placeholder">
-        QR Code
-      </div>
+      <div class="qr-placeholder" id="qr-placeholder">產生中...</div>
+      <img id="qr-image" style="display:none;" alt="QR Code" />
       <p style="color: #6b7280; font-size: 12px; margin-top: 12px;">
         或在手機輸入 IP: <span id="local-ip">192.168.x.x</span>
       </p>
@@ -242,6 +291,13 @@
       請使用 MuRemote App 掃描或輸入上方 IP 進行連線
     </div>
     
+    <div class="emulator-section">
+      <button class="emulator-toggle" id="emulator-toggle">
+        <span>模擬器掃描範圍</span><span id="emulator-toggle-arrow">▼</span>
+      </button>
+      <div class="emulator-list" id="emulator-list"></div>
+    </div>
+
     <button class="log-toggle" id="log-toggle">查看日誌</button>
     <div class="log-panel" id="log-panel"></div>
   </div>
@@ -307,12 +363,57 @@
         const localIp = await window.electronAPI.getLocalIp();
         if (localIp) document.getElementById('local-ip').textContent = localIp;
       } catch (e) { console.error('getLocalIp:', e); }
+      try {
+        const qrDataUrl = await window.electronAPI.getQrCode();
+        const img = document.getElementById('qr-image');
+        const placeholder = document.getElementById('qr-placeholder');
+        if (qrDataUrl) {
+          img.src = qrDataUrl;
+          img.style.display = 'block';
+          placeholder.style.display = 'none';
+        }
+      } catch (e) { console.error('getQrCode:', e); }
     }
     
     // 更新信息
     updateInfo();
     setInterval(updateInfo, 2000);
     
+    // 模擬器勾選
+    async function initEmulatorSelector() {
+      const [types, enabled] = await Promise.all([
+        window.electronAPI.getEmulatorTypes(),
+        window.electronAPI.getEnabledEmulators(),
+      ]);
+      const enabledSet = new Set(enabled);
+      const list = document.getElementById('emulator-list');
+
+      types.forEach(({ key, name }) => {
+        const label = document.createElement('label');
+        label.className = 'emulator-item';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = enabledSet.has(key);
+        cb.addEventListener('change', async () => {
+          if (cb.checked) enabledSet.add(key); else enabledSet.delete(key);
+          await window.electronAPI.saveEnabledEmulators([...enabledSet]);
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(name));
+        list.appendChild(label);
+      });
+    }
+
+    const emulatorToggle = document.getElementById('emulator-toggle');
+    const emulatorList = document.getElementById('emulator-list');
+    const emulatorArrow = document.getElementById('emulator-toggle-arrow');
+    emulatorToggle.addEventListener('click', () => {
+      const open = emulatorList.classList.toggle('show');
+      emulatorArrow.textContent = open ? '▲' : '▼';
+    });
+
+    initEmulatorSelector().catch(console.error);
+
     // 日誌顯示
     const logToggle = document.getElementById('log-toggle');
     const logPanel = document.getElementById('log-panel');

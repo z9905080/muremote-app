@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAdbVersion: () => ipcRenderer.invoke('get-adb-version'),
   getStreamStatus: () => ipcRenderer.invoke('get-stream-status'),
   getLocalIp: () => ipcRenderer.invoke('get-local-ip'),
+  getQrCode: () => ipcRenderer.invoke('get-qr-code'),
+
+  // 模擬器選擇
+  getEmulatorTypes: () => ipcRenderer.invoke('get-emulator-types'),
+  getEnabledEmulators: () => ipcRenderer.invoke('get-enabled-emulators'),
+  saveEnabledEmulators: (enabled) => ipcRenderer.invoke('save-enabled-emulators', enabled),
   
   // ADB 控制
   restartAdb: () => ipcRenderer.invoke('restart-adb'),

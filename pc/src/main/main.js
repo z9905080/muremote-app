@@ -11,6 +11,7 @@ const Streamer = require('./streamer');
 const TouchHandler = require('./touch_handler');
 const MultiTouchHandler = require('./multi_touch_handler');
 const MdnsAdvertiser = require('./mdns_advertiser');
+const { EMULATOR_CONFIGS } = require('./device_manager');
 const DeviceManager = require('./device_manager');
 const MultiInstanceManager = require('./multi_instance_manager');
 const ReconnectionManager = require('./reconnection_manager');
@@ -134,6 +135,7 @@ async function connectADB() {
   try {
     // 使用 DeviceManager 進行設備管理
     deviceManager = new DeviceManager();
+    deviceManager.enabledEmulators = loadEnabledEmulators();
     
     // 初始化多開同步管理器
     multiInstanceManager = new MultiInstanceManager(deviceManager);
@@ -591,6 +593,67 @@ ipcMain.handle('get-local-ip', () => {
     }
   }
   return '';
+});
+
+// ── 模擬器選擇設定（持久化到 userData/emulator-prefs.json）──────────────
+function getEmulatorPrefsPath() {
+  return path.join(app.getPath('userData'), 'emulator-prefs.json');
+}
+
+function loadEnabledEmulators() {
+  try {
+    const fs = require('fs');
+    const p = getEmulatorPrefsPath();
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (Array.isArray(data.enabled)) return data.enabled;
+    }
+  } catch (_) {}
+  return Object.keys(EMULATOR_CONFIGS); // 預設全部
+}
+
+function saveEnabledEmulators(enabled) {
+  try {
+    const fs = require('fs');
+    fs.writeFileSync(getEmulatorPrefsPath(), JSON.stringify({ enabled }, null, 2));
+  } catch (e) {
+    log.error('Failed to save emulator prefs:', e);
+  }
+}
+
+ipcMain.handle('get-emulator-types', () => {
+  return Object.entries(EMULATOR_CONFIGS).map(([key, cfg]) => ({
+    key,
+    name: cfg.nameZh,
+  }));
+});
+
+ipcMain.handle('get-enabled-emulators', () => loadEnabledEmulators());
+
+ipcMain.handle('save-enabled-emulators', (_, enabled) => {
+  saveEnabledEmulators(enabled);
+  if (deviceManager) {
+    deviceManager.enabledEmulators = enabled;
+    log.info('Enabled emulators updated:', enabled);
+  }
+  return true;
+});
+
+ipcMain.handle('get-qr-code', async () => {
+  const QRCode = require('qrcode');
+  const os = require('os');
+  const nets = os.networkInterfaces();
+  let localIp = '';
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) { localIp = net.address; break; }
+    }
+    if (localIp) break;
+  }
+  if (!localIp || !wsServer) return null;
+  const port = wsServer.options.port;
+  const payload = JSON.stringify({ ip: localIp, port, pcId });
+  return QRCode.toDataURL(payload, { width: 200, margin: 1 });
 });
 
 // Multi-instance handlers
