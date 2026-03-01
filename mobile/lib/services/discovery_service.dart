@@ -54,7 +54,7 @@ class DeviceInfo {
       name: json['name'] ?? 'Unknown',
       pcId: json['pcId'] ?? '',
       ip: json['ip'] ?? '',
-      port: json['port'] ?? 8080,
+      port: json['port'] ?? 12000,
       host: json['host'] ?? '',
       emulatorType: EmulatorType.fromString(json['emulatorType']),
     );
@@ -150,7 +150,7 @@ class DiscoveryService extends ChangeNotifier {
       name: service.name,
       pcId: pcId.isNotEmpty ? pcId : _extractPcId(service.name),
       ip: service.host ?? '',
-      port: service.port ?? 8080,
+      port: service.port ?? 12000,
       host: service.name,
       emulatorType: EmulatorType.fromString(emulatorType),
     );

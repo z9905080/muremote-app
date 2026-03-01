@@ -377,7 +377,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                             _pcIdController.text.trim().isEmpty 
                               ? ip 
                               : _pcIdController.text.trim(),
-                            serverUrl: 'ws://$ip:8080',
+                            serverUrl: 'ws://$ip:12000',
                           );
                           
                           if (streamingService.isConnected && context.mounted) {

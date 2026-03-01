@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
+const net = require('net');
 const util = require('util');
 const { AdbClient } = require('adbkit');
 const { WebSocketServer } = require('ws');
@@ -243,8 +244,23 @@ function broadcastToClients(data) {
   }
 }
 
-function startWebSocketServer() {
-  wsServer = new WebSocketServer({ port: 8080 });
+function findAvailablePort(startPort) {
+  return new Promise((resolve, reject) => {
+    const tryPort = (port) => {
+      const server = net.createServer();
+      server.once('error', () => tryPort(port + 1));
+      server.once('listening', () => {
+        server.close(() => resolve(port));
+      });
+      server.listen(port);
+    };
+    tryPort(startPort);
+  });
+}
+
+async function startWebSocketServer() {
+  const port = await findAvailablePort(config.websocket.port);
+  wsServer = new WebSocketServer({ port });
 
   wsServer.on('connection', async (ws, req) => {
     const clientId = uuidv4();
@@ -277,7 +293,8 @@ function startWebSocketServer() {
     updateTrayMenu();
   });
 
-  log.info('WebSocket server started on port 8080');
+  log.info(`WebSocket server started on port ${port}`);
+  return port;
 }
 
 async function handleClientMessage(clientId, ws, data) {
@@ -616,11 +633,11 @@ app.whenReady().then(async () => {
   await connectADB();
   initReconnectionManager();
   startDeviceMonitoring();
-  startWebSocketServer();
+  const wsPort = await startWebSocketServer();
 
   // 啟動 mDNS 服務發現
   if (config.mdns && config.mdns.advertise) {
-    mdnsAdvertiser = new MdnsAdvertiser(pcId, config.websocket.port);
+    mdnsAdvertiser = new MdnsAdvertiser(pcId, wsPort);
     mdnsAdvertiser.start();
     log.info('mDNS advertiser started');
   }

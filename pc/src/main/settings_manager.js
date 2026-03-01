@@ -31,7 +31,7 @@ class SettingsManager {
       
       // 網路設定
       network: {
-        wsPort: 8080,
+        wsPort: 12000,
         signalingPort: 8081,
         useStun: true,
         stunServer: 'stun:stun.l.google.com:19302',

@@ -115,7 +115,7 @@ class SettingsScreen extends StatelessWidget {
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(
-            hintText: '192.168.1.100:8080',
+            hintText: '192.168.1.100:12000',
             labelText: 'WebSocket 位址',
             prefixText: 'ws://',
           ),

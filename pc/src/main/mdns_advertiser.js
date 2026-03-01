@@ -8,7 +8,7 @@ const os = require('os');
 const log = require('electron-log');
 
 class MdnsAdvertiser {
-  constructor(pcId, port = 8080, emulatorType = 'unknown') {
+  constructor(pcId, port = 12000, emulatorType = 'unknown') {
     this.pcId = pcId;
     this.port = port;
     this.emulatorType = emulatorType;

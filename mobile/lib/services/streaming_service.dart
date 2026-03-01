@@ -38,7 +38,7 @@ class StreamingService extends ChangeNotifier {
   Uint8List? _currentJpegData;
 
   // Server URL - 應該從設定中獲取
-  String _serverUrl = 'ws://192.168.1.100:8080';
+  String _serverUrl = 'ws://192.168.1.100:12000';
   
   // 幀率設定
   int _setFps = 30;
