@@ -1,8 +1,8 @@
 # MuRemote 開發進度回報
 
 ## 執行時間
-- **台北時間 (UTC+8)**: 2026-03-01 23:14
-- **UTC**: 2026-03-01 15:14
+- **台北時間 (UTC+8)**: 2026-03-01 23:46
+- **UTC**: 2026-03-01 15:46
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### Remote 同步 ✅
 - 已執行 `git fetch --all`
-- 本地分支已與 origin/master 同步 (最新 commit: `000b1e5`)
+- 本地分支已與 origin/master 同步
 
 ### Issue 檢查 ✅
 - Open Issues: **0 個** (無待處理問題)
@@ -36,10 +36,10 @@
 | 分支 | 狀態 |
 |------|------|
 | master | ✅ 與 origin 同步 |
-| feature/emulator-selector | ✅ 已合併 |
-| feature/multi-emulator-support | ✅ 已合併 |
-| feature/multi-touch-fix | ✅ 已合併 |
-| feature/multi-touch-reconnection | ✅ 已合併 |
+| feature/emulator-selector | ✅ remote 存在 |
+| feature/multi-emulator-support | ✅ remote 存在 |
+| feature/multi-touch-fix | ✅ remote 存在 |
+| feature/multi-touch-reconnection | ✅ remote 存在 |
 | feature/reconnection-integration | ✅ remote 存在 |
 
 ### Git Status
