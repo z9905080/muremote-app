@@ -33,83 +33,51 @@ class _StreamingScreenState extends State<StreamingScreen> {
     });
   }
 
-  void _handlePanStart(DragStartDetails details) {
-    _lastTouchPosition = details.localPosition;
-    final streamingService = context.read<StreamingService>();
-    
-    // 計算觸控位置 (0-1 範圍)
-    final x = details.localPosition.dx / MediaQuery.of(context).size.width;
-    final y = details.localPosition.dy / MediaQuery.of(context).size.height;
-    
-    streamingService.touchDown(x, y);
-  }
-
-  void _handlePanUpdate(DragUpdateDetails details) {
-    final streamingService = context.read<StreamingService>();
-    
-    // 計算觸控位置 (0-1 範圍)
-    final x = details.localPosition.dx / MediaQuery.of(context).size.width;
-    final y = details.localPosition.dy / MediaQuery.of(context).size.height;
-    
-    streamingService.touchMove(x, y);
-    _lastTouchPosition = details.localPosition;
-  }
-
-  void _handlePanEnd(DragEndDetails details) {
-    final streamingService = context.read<StreamingService>();
-    streamingService.touchUp(0, 0);
-    _lastTouchPosition = null;
-    _activePointers.clear();
-  }
-
   void _handleScaleStart(ScaleStartDetails details) {
     if (details.pointerCount >= 2) {
       _isMultiTouchMode = true;
-      _initialPinchDistance = _calculatePinchDistance(details);
-      _lastPinchScale = details.scale;
-      
-      // 記錄第一個 pointer 的 ID
-      if (details.pointerCount == 2) {
-        final pointers = details.pointerPositions;
-        if (pointers.isNotEmpty) {
-          _firstPointerId = pointers.keys.first;
-        }
-      }
-      
-      // 發送 pointer-down 事件
-      _sendMultiTouchEvent(details, 'pointer-down');
+      _initialPinchDistance = null;
+      _lastPinchScale = 1.0;
+      _firstPointerId = null;
+    } else {
+      final size = MediaQuery.of(context).size;
+      context.read<StreamingService>().touchDown(
+        details.localFocalPoint.dx / size.width,
+        details.localFocalPoint.dy / size.height,
+      );
     }
   }
 
   void _handleScaleUpdate(ScaleUpdateDetails details) {
-    if (details.pointerCount >= 2 && _initialPinchDistance != null) {
-      final currentDistance = _calculatePinchDistance(details);
-      
+    if (details.pointerCount >= 2) {
+      final currentDistance = _calculatePinchDistance();
+      if (_initialPinchDistance == null) {
+        _initialPinchDistance = currentDistance;
+      }
+
       // 檢測縮放手勢 (使用 scale 變化)
       if (_lastPinchScale != null) {
         final scaleDiff = details.scale / _lastPinchScale!;
-        
-        // 縮放變化超過閾值
         if (scaleDiff > 1.15 || scaleDiff < 0.85) {
-          final streamingService = context.read<StreamingService>();
-          
-          // 構建多點觸控數據
-          final pointers = _buildPointersFromScaleDetails(details);
-          
+          final pointers = _buildPointersFromActivePointers();
           if (pointers.length >= 2) {
-            streamingService.sendPinch(pointers);
+            context.read<StreamingService>().sendPinch(pointers);
           }
-          
           _lastPinchScale = details.scale;
         }
       }
-      
-      // 也發送 pointer-move 事件
-      _sendMultiTouchEvent(details, 'pointer-move');
+
+      _sendMultiTouchEvent('pointer-move');
+    } else if (details.pointerCount == 1 && !_isMultiTouchMode) {
+      _lastTouchPosition = details.localFocalPoint;
+      final size = MediaQuery.of(context).size;
+      context.read<StreamingService>().touchMove(
+        details.localFocalPoint.dx / size.width,
+        details.localFocalPoint.dy / size.height,
+      );
     } else if (details.pointerCount == 1 && _isMultiTouchMode) {
-      // 從雙指回到單指，發送 pointer-up
       _isMultiTouchMode = false;
-      _sendMultiTouchEvent(details, 'pointer-up');
+      _sendMultiTouchEvent('pointer-up');
     }
   }
 
@@ -117,77 +85,52 @@ class _StreamingScreenState extends State<StreamingScreen> {
     _initialPinchDistance = null;
     _lastPinchScale = null;
     _firstPointerId = null;
-    _isMultiTouchMode = false;
-    _activePointers.clear();
-    
-    // 發送 pointer-up 事件
-    if (details.pointerCount > 0) {
-      _sendMultiTouchEvent(details, 'pointer-up');
+    if (_isMultiTouchMode) {
+      _isMultiTouchMode = false;
+    } else {
+      // 單指結束：判斷是 tap 還是 drag end
+      final size = MediaQuery.of(context).size;
+      if (_lastTouchPosition != null) {
+        context.read<StreamingService>().touchUp(
+          _lastTouchPosition!.dx / size.width,
+          _lastTouchPosition!.dy / size.height,
+        );
+      } else {
+        // tap：切換控制列顯示
+        setState(() => _showControls = !_showControls);
+      }
     }
+    _lastTouchPosition = null;
+    _activePointers.clear();
   }
 
-  /// 從 ScaleUpdateDetails 建構多點觸控數據
-  List<Map<String, dynamic>> _buildPointersFromScaleDetails(ScaleUpdateDetails details) {
+  /// 從 _activePointers 建構多點觸控數據
+  List<Map<String, dynamic>> _buildPointersFromActivePointers() {
     final size = MediaQuery.of(context).size;
-    final pointers = <Map<String, dynamic>>[];
-    
-    for (final entry in details.pointerPositions.entries) {
-      pointers.add({
-        'pointerId': entry.key,
-        'x': entry.value.dx / size.width,
-        'y': entry.value.dy / size.height,
-      });
-    }
-    
-    return pointers;
+    return _activePointers.entries.map((entry) => {
+      'pointerId': entry.key,
+      'x': entry.value.dx / size.width,
+      'y': entry.value.dy / size.height,
+    }).toList();
   }
 
   /// 發送多點觸控事件
-  void _sendMultiTouchEvent(ScaleUpdateDetails details, String action) {
+  void _sendMultiTouchEvent(String action) {
     final streamingService = context.read<StreamingService>();
-    final pointers = _buildPointersFromScaleDetails(details);
-    
+    final pointers = _buildPointersFromActivePointers();
     if (pointers.isNotEmpty) {
       streamingService.sendMultiTouch(pointers, action);
     }
   }
 
-  double _calculatePinchDistance(ScaleUpdateDetails details) {
-    // 計算兩個觸控點之間的實際距離
-    final pointerPositions = details.pointerPositions;
-    
-    if (pointerPositions.length < 2) {
-      return 1.0;
-    }
-    
-    final positions = pointerPositions.values.toList();
+  double _calculatePinchDistance() {
+    if (_activePointers.length < 2) return 1.0;
+    final positions = _activePointers.values.toList();
     final p1 = positions[0];
     final p2 = positions[1];
-    
     final dx = p2.dx - p1.dx;
     final dy = p2.dy - p1.dy;
-    
     return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  void _handleTapDown(TapDownDetails details) {
-    final streamingService = context.read<StreamingService>();
-    
-    // 計算觸控位置 (0-1 範圍)
-    final x = details.localPosition.dx / MediaQuery.of(context).size.width;
-    final y = details.localPosition.dy / MediaQuery.of(context).size.height;
-    
-    streamingService.touchDown(x, y);
-  }
-
-  void _handleTapUp(TapUpDetails details) {
-    final streamingService = context.read<StreamingService>();
-    
-    // 計算觸控位置 (0-1 範圍)
-    final x = details.localPosition.dx / MediaQuery.of(context).size.width;
-    final y = details.localPosition.dy / MediaQuery.of(context).size.height;
-    
-    streamingService.tap(x, y);
   }
 
   @override
@@ -196,20 +139,15 @@ class _StreamingScreenState extends State<StreamingScreen> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: GestureDetector(
-        onTap: () {
-          setState(() {
-            _showControls = !_showControls;
-          });
-        },
-        onPanStart: _handlePanStart,
-        onPanUpdate: _handlePanUpdate,
-        onPanEnd: _handlePanEnd,
+      body: Listener(
+        onPointerDown: (e) => _activePointers[e.pointer] = e.localPosition,
+        onPointerMove: (e) => _activePointers[e.pointer] = e.localPosition,
+        onPointerUp: (e) => _activePointers.remove(e.pointer),
+        onPointerCancel: (e) => _activePointers.remove(e.pointer),
+        child: GestureDetector(
         onScaleStart: _handleScaleStart,
         onScaleUpdate: _handleScaleUpdate,
         onScaleEnd: _handleScaleEnd,
-        onTapDown: _handleTapDown,
-        onTapUp: _handleTapUp,
         child: Stack(
           children: [
             // 遠端畫面 - 使用 JPEG 幀顯示
@@ -398,7 +336,7 @@ class _StreamingScreenState extends State<StreamingScreen> {
                     ),
                     const SizedBox(height: 8),
                     _buildSideButton(
-                      icon: Icons.network_latency,
+                      icon: Icons.network_check,
                       label: '${streamingService.latency}ms',
                     ),
                   ],
@@ -407,6 +345,7 @@ class _StreamingScreenState extends State<StreamingScreen> {
             ],
           ],
         ),
+      ),
       ),
     );
   }

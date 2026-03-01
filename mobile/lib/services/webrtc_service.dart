@@ -67,11 +67,11 @@ class WebRTCService extends ChangeNotifier {
 
     _peerConnection!.onIceConnectionState = (state) {
       debugPrint('ICE Connection State: $state');
-      if (state == IceConnectionState.connected) {
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
         _isConnected = true;
         notifyListeners();
-      } else if (state == IceConnectionState.disconnected ||
-          state == IceConnectionState.failed) {
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
         _isConnected = false;
         notifyListeners();
       }

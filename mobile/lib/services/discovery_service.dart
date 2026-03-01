@@ -4,9 +4,9 @@
  */
 
 import 'dart:async';
-import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:bonjour/bonjour.dart';
+import 'package:nsd/nsd.dart' as nsd;
 
 /// 模擬器類型
 enum EmulatorType {
@@ -77,10 +77,9 @@ class DeviceInfo {
 }
 
 class DiscoveryService extends ChangeNotifier {
-  final Discover _discover = Discover();
-  Stream? _browseStream;
+  nsd.Discovery? _discovery;
   Timer? _refreshTimer;
-  
+
   List<DeviceInfo> _devices = [];
   bool _isDiscovering = false;
   String _serviceType = '_muremote._tcp';
@@ -93,37 +92,28 @@ class DiscoveryService extends ChangeNotifier {
    */
   Future<void> startDiscovery({String? serviceType}) async {
     if (_isDiscovering) return;
-    
+
     _isDiscovering = true;
     if (serviceType != null) _serviceType = serviceType;
     notifyListeners();
 
     try {
-      // 使用 Bonjour 發現設備
-      _browseStream = _discover.browse(_serviceType);
-      
-      _browseStream!.listen(
-        (service) {
+      _discovery = await nsd.startDiscovery(_serviceType, ipLookupType: nsd.IpLookupType.any);
+      _discovery!.addServiceListener((service, status) {
+        if (status == nsd.ServiceStatus.found) {
           _handleServiceFound(service);
-        },
-        onError: (error) {
-          debugPrint('Discovery error: $error');
-          _isDiscovering = false;
+        } else if (status == nsd.ServiceStatus.lost) {
+          _devices.removeWhere((d) => d.host == (service.name ?? ''));
           notifyListeners();
-        },
-        onDone: () {
-          debugPrint('Discovery done');
-          _isDiscovering = false;
-          notifyListeners();
-        },
-      );
+        }
+      });
 
       // 每 30 秒刷新一次設備列表
       _refreshTimer = Timer.periodic(
         const Duration(seconds: 30),
         (_) => _cleanStaleDevices(),
       );
-      
+
     } catch (e) {
       debugPrint('Start discovery error: $e');
       _isDiscovering = false;
@@ -134,24 +124,24 @@ class DiscoveryService extends ChangeNotifier {
   /**
    * 處理發現的服務
    */
-  void _handleServiceFound(Service service) {
+  void _handleServiceFound(nsd.Service service) {
     debugPrint('Found service: ${service.name} at ${service.host}:${service.port}');
-    
+
     // 嘗試從 TXT 記錄獲取 PC ID 和模擬器類型
     String pcId = '';
     String emulatorType = 'unknown';
     if (service.txt != null) {
-      pcId = service.txt!['pcId'] ?? '';
-      emulatorType = service.txt!['emulatorType'] ?? 'unknown';
+      final txt = service.txt!;
+      pcId = txt['pcId'] != null ? String.fromCharCodes(txt['pcId']!) : '';
+      emulatorType = txt['emulatorType'] != null ? String.fromCharCodes(txt['emulatorType']!) : 'unknown';
     }
 
-    // 如果沒有 PC ID，從名稱解析
     final device = DeviceInfo(
-      name: service.name,
-      pcId: pcId.isNotEmpty ? pcId : _extractPcId(service.name),
+      name: service.name ?? 'MuRemote',
+      pcId: pcId.isNotEmpty ? pcId : _extractPcId(service.name ?? ''),
       ip: service.host ?? '',
       port: service.port ?? 12000,
-      host: service.name,
+      host: service.name ?? '',
       emulatorType: EmulatorType.fromString(emulatorType),
     );
 
@@ -187,7 +177,10 @@ class DiscoveryService extends ChangeNotifier {
    * 停止發現
    */
   void stopDiscovery() {
-    _browseStream = null;
+    if (_discovery != null) {
+      nsd.stopDiscovery(_discovery!);
+      _discovery = null;
+    }
     _refreshTimer?.cancel();
     _refreshTimer = null;
     _isDiscovering = false;

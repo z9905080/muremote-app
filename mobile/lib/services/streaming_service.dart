@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -201,21 +202,26 @@ class StreamingService extends ChangeNotifier {
   }
 
   /**
-   * 顯示 JPEG 幀
+   * 顯示影像幀 (支援 JPEG / PNG)
    */
-  void _displayJpegFrame(Uint8List jpegData) {
-    // 簡單檢查 JPEG 魔數
-    if (jpegData.length < 2 || jpegData[0] != 0xFF || jpegData[1] != 0xD8) {
-      // 嘗試尋找 JPEG 開始標記
-      for (int i = 0; i < jpegData.length - 1; i++) {
-        if (jpegData[i] == 0xFF && jpegData[i+1] == 0xD8) {
-          jpegData = jpegData.sublist(i);
+  void _displayJpegFrame(Uint8List frameData) {
+    if (frameData.length < 4) return;
+
+    // 接受 JPEG (FF D8) 或 PNG (89 50 4E 47)
+    final isJpeg = frameData[0] == 0xFF && frameData[1] == 0xD8;
+    final isPng  = frameData[0] == 0x89 && frameData[1] == 0x50;
+
+    if (!isJpeg && !isPng) {
+      // 嘗試在資料中找到 JPEG 起始標記
+      for (int i = 0; i < frameData.length - 1; i++) {
+        if (frameData[i] == 0xFF && frameData[i + 1] == 0xD8) {
+          frameData = frameData.sublist(i);
           break;
         }
       }
     }
-    
-    _currentJpegData = jpegData;
+
+    _currentJpegData = frameData;
     notifyListeners();
   }
 
