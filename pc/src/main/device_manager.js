@@ -5,7 +5,28 @@
  */
 
 const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const log = require('electron-log');
+const config = require('../config');
+const iconv = require('iconv-lite');
+
+// Windows 中文環境下 ADB 輸出為 GBK/CP936，需正確解碼避免亂碼
+const EXEC_OPTS = process.platform === 'win32'
+  ? { encoding: 'buffer', maxBuffer: 10 * 1024 * 1024 }
+  : {};
+function decodeOutput(buf) {
+  if (!buf) return '';
+  if (Buffer.isBuffer(buf)) {
+    try {
+      return iconv.decode(buf, 'cp936');
+    } catch (e) {
+      return buf.toString('utf8');
+    }
+  }
+  return String(buf);
+}
 
 /**
  * 模擬器配置定義
@@ -69,6 +90,8 @@ class DeviceManager {
     this.primaryDevice = null;
     this.adbPath = 'adb'; // 可以自定義 ADB 路徑
     this.emulatorType = null; // 手動設置的模擬器類型
+    this.adbAvailable = false; // ADB 是否可用
+    this.adbVersion = ''; // ADB 版本字串
   }
 
   /**
@@ -93,15 +116,102 @@ class DeviceManager {
   }
 
   /**
+   * 取得打包進應用程式的 ADB 路徑 (打包後優先使用)
+   */
+  getBundledAdbPath() {
+    const candidates = [];
+    try {
+      const { app } = require('electron');
+      if (app.isPackaged) {
+        // 打包後：嘗試多種路徑 (NSIS 安裝後結構可能不同)
+        if (process.resourcesPath) {
+          candidates.push(path.join(process.resourcesPath, 'adb', 'windows', 'adb.exe'));
+        }
+        // 備用：從 exe 所在目錄找 resources
+        const exeDir = path.dirname(process.execPath);
+        candidates.push(path.join(exeDir, 'resources', 'adb', 'windows', 'adb.exe'));
+      } else {
+        // 開發模式：從專案根目錄找
+        candidates.push(path.join(__dirname, '..', '..', 'resources', 'adb', 'windows', 'adb.exe'));
+      }
+    } catch (e) {
+      candidates.push(path.join(__dirname, '..', '..', 'resources', 'adb', 'windows', 'adb.exe'));
+    }
+    for (const adbPath of candidates) {
+      if (fs.existsSync(adbPath)) {
+        log.info('Using bundled ADB:', adbPath);
+        return adbPath;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Windows 上自動偵測 ADB 路徑 (打包 ADB > MuMu > Android SDK 等)
+   */
+  findAdbPath() {
+    if (process.platform !== 'win32') return null;
+
+    // 1. 優先使用打包進來的 ADB
+    const bundled = this.getBundledAdbPath();
+    if (bundled) return bundled;
+
+    const programFiles = process.env.PROGRAMFILES || 'C:\\Program Files';
+    const programFilesX86 = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+
+    const programFilesD = (process.env.PROGRAMFILES || 'C:\\Program Files').replace(/^[A-Z]:/, 'D:');
+    const candidates = [
+      // MuMu 12 (官方路徑: ~\Netease\MuMuPlayer-12.0\shell)
+      path.join(os.homedir(), 'Netease', 'MuMuPlayer-12.0', 'shell', 'adb.exe'),
+      path.join(programFiles, 'Netease', 'MuMu Player 12', 'emulator', 'nemu', 'adb.exe'),
+      path.join(programFiles, 'Netease', 'MuMu Player 12', 'shell', 'adb.exe'),
+      path.join(programFiles, 'Netease', 'MuMuPlayer-12.0', 'shell', 'adb.exe'),
+      path.join(programFilesD, 'Netease', 'MuMu Player 12', 'shell', 'adb.exe'),
+      // MuMu 6
+      path.join(programFiles, 'Netease', 'MuMu Player 6', 'emulator', 'nemu', 'adb.exe'),
+      path.join(programFiles, 'Netease', 'MuMu 6', 'emulator', 'nemu', 'adb.exe'),
+      // 夜神 Nox
+      path.join(programFiles, 'Nox', 'bin', 'adb.exe'),
+      path.join(programFilesX86, 'Nox', 'bin', 'adb.exe'),
+      // 雷電 LDPlayer
+      path.join(programFiles, 'LDPlayer', 'LDPlayer9', 'adb.exe'),
+      path.join(programFiles, 'LDPlayer', 'LDPlayer4', 'adb.exe'),
+      path.join(programFiles, 'LDPlayer', 'adb.exe'),
+      // Android SDK
+      path.join(localAppData, 'Android', 'Sdk', 'platform-tools', 'adb.exe'),
+    ];
+
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        log.info('Auto-detected ADB path:', p);
+        // Windows 路徑含空格時需加引號
+        return p.includes(' ') ? `"${p}"` : p;
+      }
+    }
+    return null;
+  }
+
+  /**
    * 初始化 ADB 連接
    */
   async initialize() {
     log.info('Initializing ADB connection...');
-    
+
+    // 解析 ADB 路徑：config > 自動偵測(Windows) > 預設 'adb'
+    if (config.adb && config.adb.path) {
+      const p = config.adb.path.trim().replace(/^"|"$/g, '');
+      this.adbPath = p.includes(' ') ? `"${p}"` : p;
+      log.info('Using configured ADB path:', this.adbPath);
+    } else if (this.adbPath === 'adb') {
+      const found = this.findAdbPath();
+      if (found) this.adbPath = found;
+    }
+
     // 檢查 ADB 是否可用
-    const adbAvailable = await this.checkAdb();
-    if (!adbAvailable) {
-      log.error('ADB not found');
+    this.adbAvailable = await this.checkAdb();
+    if (!this.adbAvailable) {
+      log.error('ADB not found. Please install MuMu emulator or set config.adb.path');
       return false;
     }
 
@@ -119,12 +229,16 @@ class DeviceManager {
    */
   async checkAdb() {
     return new Promise((resolve) => {
-      exec(`${this.adbPath} version`, (error, stdout, stderr) => {
+      exec(`${this.adbPath} version`, EXEC_OPTS, (error, stdout, stderr) => {
+        const out = decodeOutput(stdout);
+        const err = decodeOutput(stderr);
         if (error) {
-          log.error('ADB check failed:', error.message);
+          log.error('ADB check failed:', err || out || error.message);
           resolve(false);
         } else {
-          log.info('ADB version:', stdout.split('\n')[0]);
+          this.adbVersion = out.split('\n')[0] || 'unknown';
+          log.info('ADB version:', this.adbVersion);
+          if (out.trim()) log.info('adb version stdout:', out.trim());
           resolve(true);
         }
       });
@@ -220,11 +334,16 @@ class DeviceManager {
    */
   async connectDevice(host, port) {
     return new Promise((resolve, reject) => {
-      exec(`${this.adbPath} connect ${host}:${port}`, (error, stdout, stderr) => {
+      exec(`${this.adbPath} connect ${host}:${port}`, EXEC_OPTS, (error, stdout, stderr) => {
+        const out = decodeOutput(stdout);
+        const err = decodeOutput(stderr);
         if (error) {
-          reject(error);
+          const msg = err || out || error.message;
+          log.error('Connect failed:', msg);
+          reject(new Error(msg));
         } else {
-          log.info(`Connect result: ${stdout}`);
+          const result = (out || err).trim();
+          log.info('Connect result stdout:', result);
           resolve(true);
         }
       });
@@ -291,16 +410,23 @@ class DeviceManager {
    * 刷新設備列表
    */
   async refreshDevices() {
+    if (!this.adbAvailable) {
+      this.devices = [];
+      return Promise.resolve();
+    }
     return new Promise((resolve, reject) => {
-      exec(`${this.adbPath} devices -l`, (error, stdout, stderr) => {
+      exec(`${this.adbPath} devices -l`, EXEC_OPTS, (error, stdout, stderr) => {
+        const out = decodeOutput(stdout);
+        const err = decodeOutput(stderr);
         if (error) {
-          log.error('Failed to get devices:', error.message);
+          log.error('Failed to get devices:', err || out || error.message);
           this.devices = [];
           reject(error);
           return;
         }
+        if (out.trim()) log.info('devices stdout:', out.trim());
 
-        const lines = stdout.split('\n').filter(line => line.trim());
+        const lines = out.split('\n').filter(line => line.trim());
         this.devices = [];
 
         for (let i = 1; i < lines.length; i++) { // 跳過標題行
@@ -377,13 +503,16 @@ class DeviceManager {
     }
 
     return new Promise((resolve, reject) => {
-      exec(`${this.adbPath} -s ${this.primaryDevice.id} shell "${command}"`, 
+      exec(`${this.adbPath} -s ${this.primaryDevice.id} shell "${command}"`, EXEC_OPTS,
         (error, stdout, stderr) => {
+          const out = decodeOutput(stdout);
+          const err = decodeOutput(stderr);
           if (error) {
-            log.error('Shell error:', error.message);
+            log.error('Shell error:', err || out || error.message);
             reject(error);
           } else {
-            resolve(stdout);
+            if (out.trim()) log.info('shell stdout:', out.trim());
+            resolve(out);
           }
         });
     });
@@ -439,13 +568,16 @@ class DeviceManager {
    */
   async restart() {
     return new Promise((resolve, reject) => {
-      exec(`${this.adbPath} kill-server && ${this.adbPath} start-server`, 
+      exec(`${this.adbPath} kill-server && ${this.adbPath} start-server`, EXEC_OPTS,
         (error, stdout, stderr) => {
+          const out = decodeOutput(stdout);
+          const err = decodeOutput(stderr);
           if (error) {
-            log.error('ADB restart failed:', error.message);
+            log.error('ADB restart failed:', err || out || error.message);
             reject(error);
           } else {
             log.info('ADB restarted');
+            if (out.trim()) log.info('restart stdout:', out.trim());
             resolve(true);
           }
         });

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPcId: () => ipcRenderer.invoke('get-pc-id'),
   getConnectedCount: () => ipcRenderer.invoke('get-connected-count'),
   getAdbStatus: () => ipcRenderer.invoke('get-adb-status'),
+  getAdbVersion: () => ipcRenderer.invoke('get-adb-version'),
   getStreamStatus: () => ipcRenderer.invoke('get-stream-status'),
   getLocalIp: () => ipcRenderer.invoke('get-local-ip'),
   
@@ -25,5 +26,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onStreamData: (callback) => {
     ipcRenderer.on('stream-data', (event, data) => callback(data));
+  },
+  onAppLog: (callback) => {
+    ipcRenderer.on('app-log', (event, data) => callback(data));
   },
 });

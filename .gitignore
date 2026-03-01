@@ -33,3 +33,4 @@ ios/
 # PC specific
 dist/
 out/
+pc/platform-tools-temp*

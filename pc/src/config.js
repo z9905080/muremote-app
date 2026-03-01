@@ -8,6 +8,8 @@ module.exports = {
     host: '127.0.0.1',
     port: 7555,  // MuMu 模擬器預設端口
     timeout: 5000,
+    // 手動指定 ADB 路徑，留空則自動偵測 (Windows 會搜尋 MuMu/模擬器內建 ADB)
+    path: '',
   },
 
   // WebSocket 服務器配置

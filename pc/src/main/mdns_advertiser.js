@@ -117,8 +117,8 @@ class MdnsAdvertiser {
     // Windows 需要使用 bonjour 或類似工具
     // 這裡嘗試使用 Node.js 的 bonjour 庫
     try {
-      const { Bonjour } = require('bonjour');
-      const bonjour = new Bonjour();
+      const Bonjour = require('bonjour');
+      const bonjour = Bonjour();
       
       const service = bonjour.publish({
         name: this.serviceName,

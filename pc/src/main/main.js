@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
+const util = require('util');
 const { AdbClient } = require('adbkit');
 const { WebSocketServer } = require('ws');
 const { v4: uuidv4 } = require('uuid');
@@ -14,6 +15,17 @@ const ReconnectionManager = require('./reconnection_manager');
 const config = require('../config');
 
 log.transports.file.level = 'info';
+
+// 將 log 轉發到 renderer 供 UI 顯示
+log.hooks.push((message, transport, transportName) => {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    const time = message.date.toLocaleTimeString('zh-TW', { hour12: false });
+    const text = message.data.map(d => typeof d === 'object' ? util.inspect(d) : String(d)).join(' ');
+    mainWindow.webContents.send('app-log', { level: message.level, time, text });
+  }
+  return message;
+});
+
 log.info('MuRemote PC Client starting...');
 
 let mainWindow = null;
@@ -36,14 +48,16 @@ const ADB_PORT = 7555; // MuMu default ADB port
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 400,
-    height: 300,
+    width: 520,
+    height: 480,
+    minWidth: 400,
+    minHeight: 360,
     webPreferences: {
       preload: path.join(__dirname, 'src/preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
-    resizable: false,
+    resizable: true,
     alwaysOnTop: true,
   });
 
@@ -518,13 +532,26 @@ function updateTrayMenu() {
 ipcMain.handle('get-pc-id', () => pcId);
 ipcMain.handle('get-connected-count', () => connectedClients.size);
 ipcMain.handle('get-adb-status', async () => {
-  if (!adbClient) return 'not_connected';
-  try {
-    const devices = await adbClient.listDevices();
-    return devices.length > 0 ? 'connected' : 'no_devices';
-  } catch (e) {
-    return 'error';
+  if (!deviceManager) return 'not_connected';
+  if (!deviceManager.adbAvailable) return 'not_connected';
+  const count = deviceManager.devices?.length ?? 0;
+  return count > 0 ? 'connected' : 'no_devices';
+});
+ipcMain.handle('get-adb-version', () => {
+  return deviceManager?.adbVersion ?? '';
+});
+ipcMain.handle('get-stream-status', () => {
+  return streamer?.isStreaming ? 'active' : 'standby';
+});
+ipcMain.handle('get-local-ip', () => {
+  const os = require('os');
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) return net.address;
+    }
   }
+  return '';
 });
 
 // Multi-instance handlers
