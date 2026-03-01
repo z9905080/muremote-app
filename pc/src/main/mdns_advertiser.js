@@ -119,13 +119,14 @@ class MdnsAdvertiser {
     try {
       const Bonjour = require('bonjour');
       const bonjour = Bonjour();
-      
+      this._bonjour = bonjour; // 保存實例，供 stop() 呼叫 destroy() 釋放 UDP socket
+
       const service = bonjour.publish({
         name: this.serviceName,
         type: 'muremote',
         port: this.port,
-        txt: { 
-          pcId: this.pcId, 
+        txt: {
+          pcId: this.pcId,
           version: '1.0',
           emulatorType: this.emulatorType
         }
@@ -148,12 +149,18 @@ class MdnsAdvertiser {
       this.process.kill();
       this.process = null;
     }
-    
+
     if (this._service) {
       this._service.stop();
       this._service = null;
     }
-    
+
+    // destroy() 關閉底層的 multicast UDP socket，避免 process 無法退出
+    if (this._bonjour) {
+      try { this._bonjour.destroy(); } catch (_) {}
+      this._bonjour = null;
+    }
+
     log.info('mDNS advertisement stopped');
   }
 }

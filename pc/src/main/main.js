@@ -16,46 +16,7 @@ const MultiInstanceManager = require('./multi_instance_manager');
 const ReconnectionManager = require('./reconnection_manager');
 const config = require('../config');
 
-log.transports.file.level = 'info';
-
-// 自訂 transport：將 log 轉發到 renderer 供 UI 顯示
-log.transports.ipc = (msg) => {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-    const time = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-    const text = msg.data.map(d => typeof d === 'object' ? util.inspect(d) : String(d)).join(' ');
-    mainWindow.webContents.send('app-log', { level: msg.level, time, text });
-  }
-};
-log.transports.ipc.level = 'info';
-
-// 攔截 stdout/stderr，統一轉發到 electron-log（寫檔 + UI）
-// 用 flag 避免 log 本身寫 stdout 造成無限迴圈
-let _logIntercepting = false;
-const _origStdoutWrite = process.stdout.write.bind(process.stdout);
-const _origStderrWrite = process.stderr.write.bind(process.stderr);
-
-process.stdout.write = (chunk, encoding, callback) => {
-  if (!_logIntercepting) {
-    _logIntercepting = true;
-    const text = chunk.toString().trimEnd();
-    if (text) log.info(text);
-    _logIntercepting = false;
-  }
-  return _origStdoutWrite(chunk, encoding, callback);
-};
-
-process.stderr.write = (chunk, encoding, callback) => {
-  if (!_logIntercepting) {
-    _logIntercepting = true;
-    const text = chunk.toString().trimEnd();
-    if (text) log.error(text);
-    _logIntercepting = false;
-  }
-  return _origStderrWrite(chunk, encoding, callback);
-};
-
-log.info('MuRemote PC Client starting...');
-
+// 全域變數必須在 transport 定義之前宣告，避免 let TDZ 錯誤
 let mainWindow = null;
 let tray = null;
 let adbClient = null;
@@ -69,6 +30,30 @@ let multiInstanceManager = null;
 let reconnectionManager = null;
 let connectedClients = new Map();
 let pcId = uuidv4().substring(0, 8).toUpperCase();
+let hasShownTrayHint = false;
+
+log.transports.file.level = 'info';
+// 明確設定 log 檔案路徑，確保寫入已知位置
+log.transports.file.resolvePathFn = () => {
+  try {
+    return path.join(app.getPath('userData'), 'logs', 'muremote.log');
+  } catch (e) {
+    return path.join(__dirname, '..', '..', 'logs', 'muremote.log');
+  }
+};
+
+// 自訂 transport：將 log 從 main process 轉發到 renderer UI 顯示
+// 使用 'ui' 名稱，避免與 electron-log v5 內建 'ipc' transport 衝突
+log.transports.ui = (msg) => {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    const time = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    const text = msg.data.map(d => typeof d === 'object' ? util.inspect(d) : String(d)).join(' ');
+    mainWindow.webContents.send('app-log', { level: msg.level, time, text });
+  }
+};
+log.transports.ui.level = 'info';
+
+log.info('MuRemote PC Client starting...');
 
 // ADB connection settings
 const ADB_HOST = '127.0.0.1';
@@ -81,7 +66,7 @@ function createWindow() {
     minWidth: 400,
     minHeight: 360,
     webPreferences: {
-      preload: path.join(__dirname, 'src/preload/preload.js'),
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -95,6 +80,14 @@ function createWindow() {
     if (!app.isQuitting) {
       event.preventDefault();
       mainWindow.hide();
+      if (!hasShownTrayHint) {
+        hasShownTrayHint = true;
+        tray.displayBalloon({
+          iconType: 'info',
+          title: 'MuRemote 仍在背景執行',
+          content: '程式已最小化到系統匣。如需完全退出，請右鍵點擊右下角圖示選擇「退出」。'
+        });
+      }
     }
   });
 
@@ -108,9 +101,11 @@ function createTray() {
   try {
     trayIcon = nativeImage.createFromPath(iconPath);
     if (trayIcon.isEmpty()) {
+      log.warn('Tray icon not found or empty:', iconPath);
       trayIcon = nativeImage.createEmpty();
     }
   } catch (e) {
+    log.warn('Tray icon load error:', e.message);
     trayIcon = nativeImage.createEmpty();
   }
 
@@ -682,12 +677,27 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
-  if (streamer) streamer.stopStream();
-  if (wsServer) wsServer.close();
-  if (mdnsAdvertiser) mdnsAdvertiser.stop();
-  if (reconnectionManager) reconnectionManager.stopReconnect();
+  log.info('MuRemote PC Client shutting down...');
+
   stopDeviceMonitoring();
-  log.info('MuRemote PC Client shutting down');
+  if (reconnectionManager) reconnectionManager.stopReconnect();
+
+  // 強制斷開所有 WebSocket 連線（wsServer.close() 不會主動關閉已有連線）
+  for (const [, client] of connectedClients) {
+    try { if (client.ws) client.ws.terminate(); } catch (_) {}
+  }
+  connectedClients.clear();
+
+  if (streamer) { streamer.stopStream(); streamer = null; }
+  if (wsServer) { wsServer.close(); wsServer = null; }
+  if (mdnsAdvertiser) { mdnsAdvertiser.stop(); mdnsAdvertiser = null; }
+
+  // 保險機制：1.5 秒後用 app.exit(0) 強制退出整個 Electron（含 renderer、GPU 所有 child process）
+  // app.exit() 是 Electron 官方 API，比 process.exit() 更徹底
+  setTimeout(() => {
+    log.info('Force exit via app.exit(0)');
+    app.exit(0);
+  }, 1500);
 });
 
 log.info('Main process initialized');

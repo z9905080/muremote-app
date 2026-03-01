@@ -339,12 +339,15 @@ class DeviceManager {
         const err = decodeOutput(stderr);
         if (error) {
           const msg = err || out || error.message;
-          log.error('Connect failed:', msg);
           reject(new Error(msg));
         } else {
           const result = (out || err).trim();
-          log.info('Connect result stdout:', result);
-          resolve(true);
+          if (result.includes('connected to') || result.includes('already connected')) {
+            resolve(true);
+          } else {
+            // adb connect 回傳 exit 0 但實際連線失敗 (e.g. "cannot connect to ...")
+            reject(new Error(result));
+          }
         }
       });
     });
