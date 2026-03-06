@@ -1,184 +1,268 @@
 /**
  * Touch Handler - 觸控事件處理
- * 處理手機端的觸控事件並轉換為 ADB 命令
+ *
+ * 注入模式（優先順序）：
+ *   1. scrcpy 控制通道（推薦）：
+ *      二進制協議，持久連線，延遲 < 5ms，支援多點觸控
+ *
+ *   2. adb shell 回退模式：
+ *      每次 touch 呼叫 adb shell input tap/swipe
+ *      延遲 80-150ms（需 fork 新程序）
+ *
+ * 在 main.js 透過 setScrcpyManager() 傳入 ScrcpyManager 後即啟用高效模式。
  */
 
+const { exec } = require('child_process');
 const log = require('electron-log');
 
 class TouchHandler {
-  constructor(adbClient, deviceId) {
-    this.adbClient = adbClient;
+  constructor(adbPath, deviceId) {
+    this.adbPath  = adbPath;
     this.deviceId = deviceId;
+
+    // 由 main.js 注入；存在且 isRunning 時使用 scrcpy 控制通道
+    this.scrcpyManager = null;
+
     this.lastX = 0;
     this.lastY = 0;
     this.isDown = false;
-    
-    // 螢幕解析度 (預設，實際應該從設備獲取)
-    this.screenWidth = 1080;
+
+    // 螢幕解析度（從設備取得）
+    this.screenWidth  = 1080;
     this.screenHeight = 1920;
   }
 
+  // ─────────────────────────────────────────
+  // 公開 API
+  // ─────────────────────────────────────────
+
   /**
-   * 處理觸控事件
-   * @param {Object} data - 觸控數據 { action, x, y, pointerId }
+   * 由 main.js 在初始化 ScrcpyManager 後呼叫。
+   */
+  setScrcpyManager(manager) {
+    this.scrcpyManager = manager;
+    log.info('[TouchHandler] ScrcpyManager 已注入，將使用 scrcpy 控制通道');
+  }
+
+  /**
+   * 處理觸控事件（單指）。
+   * @param {object} data - { action, x, y, pointerId?, endX?, endY?, duration? }
+   *                        x, y 為歸一化座標（0-1）
    */
   async handleTouch(data) {
     const { action, x, y, pointerId = 0 } = data;
-    
-    // 轉換座標 (0-1 範圍 -> 實際像素)
-    const posX = Math.floor(x * this.screenWidth);
-    const posY = Math.floor(y * this.screenHeight);
+
+    const posX = Math.round(x * this.screenWidth);
+    const posY = Math.round(y * this.screenHeight);
 
     try {
       switch (action) {
-        case 'down':
-          await this.touchDown(posX, posY);
+        case 'down':  await this.touchDown(posX, posY, pointerId);  break;
+        case 'move':  await this.touchMove(posX, posY, pointerId);  break;
+        case 'up':    await this.touchUp(posX, posY, pointerId);    break;
+        case 'tap':   await this.tap(posX, posY);                   break;
+        case 'swipe': {
+          const ex = Math.round((data.endX ?? x) * this.screenWidth);
+          const ey = Math.round((data.endY ?? y) * this.screenHeight);
+          await this.swipe(posX, posY, ex, ey, data.duration ?? 300);
           break;
-        case 'move':
-          await this.touchMove(posX, posY);
-          break;
-        case 'up':
-          await this.touchUp(posX, posY);
-          break;
-        case 'tap':
-          await this.tap(posX, posY);
-          break;
-        case 'swipe':
-          await this.swipe(x, y, data.endX, data.endY, data.duration || 300);
-          break;
-        case 'pinch':
-          // 支援縮放 (進階功能)
-          await this.handlePinch(data);
-          break;
+        }
         default:
-          log.warn('Unknown touch action:', action);
+          log.warn('[TouchHandler] 未知觸控動作：', action);
       }
-    } catch (error) {
-      log.error('Touch event error:', error);
+    } catch (err) {
+      log.error('[TouchHandler] 觸控事件錯誤：', err.message);
     }
   }
 
   /**
-   * 按下
+   * 按下。
    */
-  async touchDown(x, y) {
+  async touchDown(x, y, pointerId = 0) {
+    this.lastX  = x;
+    this.lastY  = y;
+    this.isDown = true;
+
+    if (this._useScrcpy()) {
+      this.scrcpyManager.sendTouchEvent(0, x, y, this.screenWidth, this.screenHeight, pointerId);
+    } else {
+      await this._adbShell(`input tap ${x} ${y}`);
+    }
+  }
+
+  /**
+   * 移動。
+   */
+  async touchMove(x, y, pointerId = 0) {
+    const dx       = x - this.lastX;
+    const dy       = y - this.lastY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance < 2) return;  // 微小移動忽略
+
+    if (this._useScrcpy()) {
+      this.scrcpyManager.sendTouchEvent(2, x, y, this.screenWidth, this.screenHeight, pointerId);
+    } else {
+      const duration = Math.max(10, Math.floor(distance / 2));
+      await this._adbShell(`input swipe ${this.lastX} ${this.lastY} ${x} ${y} ${duration}`);
+    }
+
     this.lastX = x;
     this.lastY = y;
-    this.isDown = true;
-    
-    // 使用 input tap 模擬觸控按下
-    await this.adbClient.shell(this.deviceId, `input tap ${x} ${y}`);
-    log.info(`Touch DOWN: ${x}, ${y}`);
   }
 
   /**
-   * 移動
+   * 放開。
    */
-  async touchMove(x, y) {
-    // 計算滑動路徑
-    const dx = x - this.lastX;
-    const dy = y - this.lastY;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    
-    // 只有移動距離夠大才發送
-    if (distance > 5) {
-      // 使用 swipe 模擬滑動
-      const duration = Math.max(10, Math.floor(distance / 2));
-      await this.adbClient.shell(this.deviceId, 
-        `input swipe ${this.lastX} ${this.lastY} ${x} ${y} ${duration}`
-      );
-      this.lastX = x;
-      this.lastY = y;
-    }
-  }
-
-  /**
-   * 放開
-   */
-  async touchUp(x, y) {
+  async touchUp(x, y, pointerId = 0) {
     this.isDown = false;
-    // 放開不需要特別動作，因為 swipe 已經完成
-    log.info(`Touch UP: ${x}, ${y}`);
+
+    if (this._useScrcpy()) {
+      this.scrcpyManager.sendTouchEvent(1, x, y, this.screenWidth, this.screenHeight, pointerId);
+    }
+    // adb shell 回退：swipe 完成後不需要額外的 UP 事件
   }
 
   /**
-   * 點擊
+   * 點擊（down + up）。
    */
   async tap(x, y) {
-    await this.adbClient.shell(this.deviceId, `input tap ${x} ${y}`);
-    log.info(`TAP: ${x}, ${y}`);
+    if (this._useScrcpy()) {
+      this.scrcpyManager.sendTouchEvent(0, x, y, this.screenWidth, this.screenHeight, 0);
+      // 給設備一點反應時間後再發 UP（模擬真實點擊）
+      await this._sleep(50);
+      this.scrcpyManager.sendTouchEvent(1, x, y, this.screenWidth, this.screenHeight, 0);
+    } else {
+      await this._adbShell(`input tap ${x} ${y}`);
+    }
+    log.debug(`[TouchHandler] TAP: ${x}, ${y}`);
   }
 
   /**
-   * 滑動
+   * 滑動（接受歸一化或像素座標）。
+   * @param {number} startX, startY  - 像素座標
+   * @param {number} endX, endY      - 像素座標
+   * @param {number} duration        - 毫秒
    */
   async swipe(startX, startY, endX, endY, duration = 300) {
-    const sx = Math.floor(startX * this.screenWidth);
-    const sy = Math.floor(startY * this.screenHeight);
-    const ex = Math.floor(endX * this.screenWidth);
-    const ey = Math.floor(endY * this.screenHeight);
-    
-    await this.adbClient.shell(this.deviceId, 
-      `input swipe ${sx} ${sy} ${ex} ${ey} ${duration}`
-    );
-    log.info(`SWIPE: ${sx},${sy} -> ${ex},${ey} (${duration}ms)`);
+    if (this._useScrcpy()) {
+      // 分拆成多個 MOVE 事件以模擬平滑滑動
+      await this._scrcpySwipe(startX, startY, endX, endY, duration);
+    } else {
+      await this._adbShell(`input swipe ${startX} ${startY} ${endX} ${endY} ${duration}`);
+    }
+    log.debug(`[TouchHandler] SWIPE: ${startX},${startY} -> ${endX},${endY} (${duration}ms)`);
   }
 
   /**
-   * 處理雙指縮放
-   */
-  async handlePinch(data) {
-    // 雙指縮放需要更複雜的 ADB 命令
-    // 這是一個進階功能，POC 階段可以跳過
-    log.info('Pinch gesture detected (not implemented in POC)');
-  }
-
-  /**
-   * 發送鍵盤事件
+   * 發送鍵盤事件。
+   * @param {string} key - 'back' | 'home' | 'menu' | 'enter' | 'delete' | 數字字串
    */
   async sendKey(key) {
-    const keyMap = {
-      'back': '4',      // 返回
-      'home': '3',      // 首頁
-      'menu': '82',     // 選單
-      'enter': '66',    // 確定
-      'delete': '67',   // 刪除
-      'esc': '4',       // ESC
-    };
-
-    const keyCode = keyMap[key] || key;
-    await this.adbClient.shell(this.deviceId, `input keyevent ${keyCode}`);
-    log.info(`KEY: ${key} (${keyCode})`);
+    if (this._useScrcpy()) {
+      this.scrcpyManager.sendNamedKey(String(key));
+    } else {
+      const keyMap = {
+        back:   '4',
+        home:   '3',
+        menu:   '82',
+        enter:  '66',
+        delete: '67',
+        esc:    '4',
+      };
+      const keyCode = keyMap[key] ?? key;
+      await this._adbShell(`input keyevent ${keyCode}`);
+    }
+    log.debug(`[TouchHandler] KEY: ${key}`);
   }
 
   /**
-   * 發送文字
+   * 發送文字輸入。
    */
   async sendText(text) {
-    // 文字需要特殊處理
-    const escaped = text.replace(/ /g, '%s');
-    await this.adbClient.shell(this.deviceId, `input text ${escaped}`);
-    log.info(`TEXT: ${text}`);
+    if (this._useScrcpy()) {
+      // scrcpy SET_CLIPBOARD + INJECT_TEXT 較複雜，回退用 adb shell
+      // 但先用 adb shell 保持相容性（text 輸入頻率遠低於 touch）
+      const escaped = text.replace(/ /g, '%s').replace(/'/g, "\\'");
+      await this._adbShell(`input text '${escaped}'`);
+    } else {
+      const escaped = text.replace(/ /g, '%s');
+      await this._adbShell(`input text ${escaped}`);
+    }
+    log.debug(`[TouchHandler] TEXT: ${text}`);
   }
 
   /**
-   * 設定螢幕解析度
+   * 從設備取得螢幕解析度並快取。
+   * @returns {{ width: number, height: number }}
    */
   async updateScreenSize() {
-    try {
-      // 獲取實際螢幕大小
-      const result = await this.adbClient.shell(this.deviceId, 
-        'wm size'
+    return new Promise((resolve) => {
+      exec(
+        `${this.adbPath} -s ${this.deviceId} shell wm size`,
+        { maxBuffer: 512 * 1024 },
+        (err, stdout) => {
+          if (!err) {
+            const match = (stdout || '').match(/(\d+)x(\d+)/);
+            if (match) {
+              this.screenWidth  = parseInt(match[1], 10);
+              this.screenHeight = parseInt(match[2], 10);
+              log.info(`[TouchHandler] 螢幕大小：${this.screenWidth}x${this.screenHeight}`);
+            }
+          } else {
+            log.warn('[TouchHandler] 無法取得螢幕大小，使用預設值');
+          }
+          resolve({ width: this.screenWidth, height: this.screenHeight });
+        }
       );
-      const match = result.match(/(\d+)x(\d+)/);
-      if (match) {
-        this.screenWidth = parseInt(match[1]);
-        this.screenHeight = parseInt(match[2]);
-        log.info(`Screen size: ${this.screenWidth}x${this.screenHeight}`);
-      }
-    } catch (e) {
-      log.warn('Could not get screen size, using defaults');
+    });
+  }
+
+  // ─────────────────────────────────────────
+  // 內部實作
+  // ─────────────────────────────────────────
+
+  _useScrcpy() {
+    return !!(this.scrcpyManager?.isRunning && this.scrcpyManager?.controlSocket);
+  }
+
+  /**
+   * 用 scrcpy 控制通道模擬平滑滑動：
+   * DOWN → N × MOVE → UP
+   */
+  async _scrcpySwipe(x1, y1, x2, y2, durationMs) {
+    const STEPS = Math.max(3, Math.round(durationMs / 16));  // ~60fps 步數
+    const stepDelay = Math.round(durationMs / STEPS);
+    const m = this.scrcpyManager;
+
+    m.sendTouchEvent(0, x1, y1, this.screenWidth, this.screenHeight, 0);  // DOWN
+
+    for (let i = 1; i < STEPS; i++) {
+      const t  = i / STEPS;
+      const mx = Math.round(x1 + (x2 - x1) * t);
+      const my = Math.round(y1 + (y2 - y1) * t);
+      m.sendTouchEvent(2, mx, my, this.screenWidth, this.screenHeight, 0);  // MOVE
+      await this._sleep(stepDelay);
     }
+
+    m.sendTouchEvent(1, x2, y2, this.screenWidth, this.screenHeight, 0);  // UP
+  }
+
+  _adbShell(command) {
+    return new Promise((resolve) => {
+      exec(
+        `${this.adbPath} -s ${this.deviceId} shell ${command}`,
+        { maxBuffer: 512 * 1024 },
+        (err) => {
+          if (err) log.warn('[TouchHandler] adb shell 錯誤：', err.message);
+          resolve();
+        }
+      );
+    });
+  }
+
+  _sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 

@@ -10,6 +10,7 @@ log.initialize();
 const Streamer = require('./streamer');
 const TouchHandler = require('./touch_handler');
 const MultiTouchHandler = require('./multi_touch_handler');
+const ScrcpyManager = require('./scrcpy_manager');
 const MdnsAdvertiser = require('./mdns_advertiser');
 const { EMULATOR_CONFIGS } = require('./device_manager');
 const DeviceManager = require('./device_manager');
@@ -25,6 +26,7 @@ let wsServer = null;
 let streamer = null;
 let touchHandler = null;
 let multiTouchHandler = null;
+let scrcpyManager = null;
 let mdnsAdvertiser = null;
 let deviceManager = null;
 let multiInstanceManager = null;
@@ -150,9 +152,12 @@ async function connectADB() {
       streamer = new Streamer(deviceManager.adbPath, device.id);
       touchHandler = new TouchHandler(deviceManager.adbPath, device.id);
       multiTouchHandler = new MultiTouchHandler(touchHandler);
-      
+
       // 獲取螢幕大小
       await touchHandler.updateScreenSize();
+
+      // 嘗試啟動 scrcpy 高效串流（需要 scrcpy-server.jar）
+      await _initScrcpy(device.id);
       
       log.info('Connected to device:', device.id, '- Type:', device.emulatorName || device.emulatorType);
       
@@ -171,6 +176,42 @@ async function connectADB() {
   } catch (error) {
     log.error('ADB connection error:', error);
     return false;
+  }
+}
+
+/**
+ * 初始化 ScrcpyManager 並注入到 Streamer / TouchHandler。
+ * 失敗時靜默回退 – screencap + adb shell 仍可正常工作。
+ */
+async function _initScrcpy(deviceId) {
+  if (!streamer || !touchHandler) return;
+
+  // 若已有舊的 scrcpy 實例，先停止
+  if (scrcpyManager) {
+    scrcpyManager.stop();
+    scrcpyManager = null;
+  }
+
+  scrcpyManager = new ScrcpyManager(deviceManager.adbPath, deviceId);
+
+  scrcpyManager.on('closed', () => {
+    log.warn('[main] scrcpy 已斷開，回退至 screencap 模式');
+  });
+
+  const ok = await scrcpyManager.start({
+    maxSize:  1280,
+    maxFps:   30,
+    bitRate:  4_000_000,
+  });
+
+  if (ok) {
+    streamer.setScrcpyManager(scrcpyManager);
+    touchHandler.setScrcpyManager(scrcpyManager);
+    log.info('[main] scrcpy 高效模式已啟用 (H.264 串流 + 低延遲觸控)');
+  } else {
+    log.warn('[main] scrcpy 啟動失敗，使用 screencap 回退模式');
+    log.warn('[main] 請執行 node scripts/download-scrcpy.js 下載 scrcpy-server.jar');
+    scrcpyManager = null;
   }
 }
 
@@ -342,9 +383,12 @@ async function handleClientMessage(clientId, ws, data) {
             streamer = new Streamer(deviceManager.adbPath, device.id);
             touchHandler = new TouchHandler(deviceManager.adbPath, device.id);
             multiTouchHandler = new MultiTouchHandler(touchHandler);
-            
+
             log.info('Switched to emulator:', device.emulatorName || emulatorType);
-            
+
+            // 重新啟動 scrcpy（非同步，失敗不影響連線）
+            _initScrcpy(device.id).catch(e => log.warn('scrcpy re-init failed:', e.message));
+
             // 發送確認消息
             ws.send(JSON.stringify({
               type: 'connected',
@@ -751,6 +795,7 @@ app.on('before-quit', () => {
   }
   connectedClients.clear();
 
+  if (scrcpyManager) { scrcpyManager.stop(); scrcpyManager = null; }
   if (streamer) { streamer.stopStream(); streamer = null; }
   if (wsServer) { wsServer.close(); wsServer = null; }
   if (mdnsAdvertiser) { mdnsAdvertiser.stop(); mdnsAdvertiser = null; }
