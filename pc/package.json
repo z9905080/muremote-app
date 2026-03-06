@@ -5,8 +5,8 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
-    "postinstall": "node scripts/download-adb.js",
-    "prebuild": "node scripts/download-adb.js",
+    "postinstall": "node scripts/download-adb.js && node scripts/download-scrcpy.js",
+    "prebuild": "node scripts/download-adb.js && node scripts/download-scrcpy.js",
     "build": "npm run prebuild && electron-builder --win"
   },
   "author": "MuRemote Team",
@@ -34,6 +34,13 @@
       {
         "from": "resources/adb/",
         "to": "adb",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/scrcpy/",
+        "to": "scrcpy",
         "filter": [
           "**/*"
         ]
