@@ -188,7 +188,8 @@ class Streamer {
 
   async _startScrcpyStream() {
     // 啟動 ffmpeg：stdin 接收 H.264，stdout 輸出連續 JPEG 幀
-    this._ffmpegProc = spawn(this._ffmpegPath, [
+    const ffmpegBin = this._ffmpegPath.replace(/^"|"$/g, '');
+    this._ffmpegProc = spawn(ffmpegBin, [
       '-loglevel', 'quiet',
       '-f',        'h264',      // 輸入格式：raw H.264 Annex B
       '-i',        'pipe:0',    // 從 stdin 讀取
@@ -307,9 +308,11 @@ class Streamer {
 
   _screencap() {
     return new Promise((resolve, reject) => {
-      const chunks = [];
-      const args   = ['-s', this.deviceId, 'exec-out', 'screencap', '-p'];
-      const proc   = spawn(this.adbPath, args);
+      const chunks  = [];
+      // spawn() 不接受帶引號的路徑，需移除 device_manager 加上的引號
+      const adbBin  = this.adbPath.replace(/^"|"$/g, '');
+      const args    = ['-s', this.deviceId, 'exec-out', 'screencap', '-p'];
+      const proc    = spawn(adbBin, args);
       this._currentProc = proc;
 
       proc.stdout.on('data', chunk => chunks.push(chunk));
