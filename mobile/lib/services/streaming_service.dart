@@ -260,8 +260,10 @@ class StreamingService extends ChangeNotifier {
    * 開始串流
    */
   Future<void> startStreaming() async {
+    debugPrint('[StreamingService] startStreaming() called, isConnected=$_isConnected, isStreaming=$_isStreaming');
     if (!_isConnected || _isStreaming) return;
 
+    debugPrint('[StreamingService] 送出 start-stream');
     _ws?.add(jsonEncode({
       'type': 'start-stream'
     }));

@@ -32,12 +32,16 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     super.dispose();
   }
 
-  void _connectToDevice(DeviceInfo device) {
+  Future<void> _connectToDevice(DeviceInfo device) async {
+    debugPrint('[ConnectionScreen] _connectToDevice: ${device.ip}:${device.port}');
     final streamingService = context.read<StreamingService>();
-    streamingService.connect(
+    await streamingService.connect(
       device.pcId,
       serverUrl: 'ws://${device.ip}:${device.port}',
     );
+    if (streamingService.isConnected && mounted) {
+      Navigator.pushNamed(context, '/stream');
+    }
   }
 
   /// 顯示模擬器選擇對話框
@@ -58,14 +62,19 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   }
 
   /// 連接時指定模擬器類型
-  void _connectWithEmulator(DeviceInfo device, EmulatorType emulatorType) {
+  Future<void> _connectWithEmulator(DeviceInfo device, EmulatorType emulatorType) async {
+    debugPrint('[ConnectionScreen] _connectWithEmulator: ${device.ip}:${device.port} type=${emulatorType.key}');
     final streamingService = context.read<StreamingService>();
     // 傳送模擬器類型到 PC 端
-    streamingService.connect(
+    await streamingService.connect(
       device.pcId,
       serverUrl: 'ws://${device.ip}:${device.port}',
       metadata: {'emulatorType': emulatorType.key},
     );
+    debugPrint('[ConnectionScreen] connect() returned, isConnected=${streamingService.isConnected}');
+    if (streamingService.isConnected && mounted) {
+      Navigator.pushNamed(context, '/stream');
+    }
   }
 
   /// 獲取模擬器對應的顏色
