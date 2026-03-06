@@ -4,6 +4,7 @@ node_modules/
 
 # Build outputs
 build/
+!pc/build/
 .dart_tool/
 .packages
 

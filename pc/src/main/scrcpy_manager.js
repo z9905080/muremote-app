@@ -112,11 +112,9 @@ class ScrcpyManager extends EventEmitter {
       // 4. 等待 server 就緒（監聽 abstract socket）
       await this._sleep(1200);
 
-      // 5. 連接影像 socket（先連）
-      await this._connectVideoSocket();
-
-      // 6. 連接控制 socket（後連）
-      await this._connectControlSocket();
+      // 5 & 6. 同時連接影像與控制 socket
+      // scrcpy 2.x 需要兩個連接都建立後才送出影像 header，必須並行連接
+      await this._connectSockets();
 
       this.isRunning = true;
       log.info(`[ScrcpyManager] 就緒：${this.deviceName} ${this.videoWidth}x${this.videoHeight}`);
@@ -308,28 +306,47 @@ class ScrcpyManager extends EventEmitter {
     });
   }
 
-  _connectVideoSocket() {
+  /**
+   * 同時建立影像與控制兩個 socket 連接。
+   *
+   * scrcpy 2.x 的 tunnel_forward 協議：
+   *   1. server 接受第一個連接（影像）
+   *   2. server 接受第二個連接（控制）
+   *   3. 兩個連接都就緒後，server 才在影像 socket 送出 72 bytes header
+   *
+   * 若依序連接（先等影像 header 再連控制），會造成雙方互相等待的 deadlock。
+   * 解法：同時發起兩個連接，再等待影像 header。
+   */
+  _connectSockets() {
     return new Promise((resolve, reject) => {
-      const socket = net.createConnection(SCRCPY_PORT, '127.0.0.1');
-      const timeout = setTimeout(() => {
-        socket.destroy();
-        reject(new Error('影像 socket 連接逾時'));
-      }, 8000);
-
-      // scrcpy 2.x: send_device_meta=true 時，header = 64(name) + 4(w) + 4(h) = 72 bytes
       const HEADER_SIZE = 72;
       let headerBuf = Buffer.alloc(0);
       let headerDone = false;
+      let rejected = false;
 
-      socket.on('connect', () => log.info('[ScrcpyManager] 影像 socket 已連接'));
+      const fail = (err) => {
+        if (rejected) return;
+        rejected = true;
+        clearTimeout(timeout);
+        videoSocket.destroy();
+        controlSocket.destroy();
+        reject(err);
+      };
 
-      socket.on('data', (chunk) => {
+      const timeout = setTimeout(() => {
+        fail(new Error('影像 socket 連接逾時'));
+      }, 8000);
+
+      // ── 影像 socket ───────────────────────
+      const videoSocket = net.createConnection(SCRCPY_PORT, '127.0.0.1');
+
+      videoSocket.on('connect', () => log.info('[ScrcpyManager] 影像 socket 已連接'));
+
+      videoSocket.on('data', (chunk) => {
         if (headerDone) {
-          // 直接發送 H.264 資料
           this.emit('video-data', chunk);
           return;
         }
-
         headerBuf = Buffer.concat([headerBuf, chunk]);
         if (headerBuf.length >= HEADER_SIZE) {
           clearTimeout(timeout);
@@ -338,27 +355,26 @@ class ScrcpyManager extends EventEmitter {
           this.deviceName  = headerBuf.slice(0, 64).toString('utf8').replace(/\0/g, '');
           this.videoWidth  = headerBuf.readUInt32BE(64);
           this.videoHeight = headerBuf.readUInt32BE(68);
-
           log.info(`[ScrcpyManager] 設備：${this.deviceName} ${this.videoWidth}x${this.videoHeight}`);
 
-          // header 之後的部分就是 H.264 資料
           const rest = headerBuf.slice(HEADER_SIZE);
           if (rest.length > 0) this.emit('video-data', rest);
 
+          this.videoSocket   = videoSocket;
+          this.controlSocket = controlSocket;
           resolve();
         }
       });
 
-      socket.on('error', (err) => {
-        clearTimeout(timeout);
-        if (!headerDone) reject(err);
+      videoSocket.on('error', (err) => {
+        if (!headerDone) fail(err);
         else {
           log.error('[ScrcpyManager] 影像 socket 錯誤:', err.message);
           this.emit('error', err);
         }
       });
 
-      socket.on('close', () => {
+      videoSocket.on('close', () => {
         if (!headerDone) return;
         log.info('[ScrcpyManager] 影像 socket 已關閉');
         this.videoSocket = null;
@@ -368,31 +384,16 @@ class ScrcpyManager extends EventEmitter {
         }
       });
 
-      this.videoSocket = socket;
-    });
-  }
+      // ── 控制 socket ───────────────────────
+      const controlSocket = net.createConnection(SCRCPY_PORT, '127.0.0.1');
 
-  _connectControlSocket() {
-    return new Promise((resolve, reject) => {
-      const socket = net.createConnection(SCRCPY_PORT, '127.0.0.1');
-      const timeout = setTimeout(() => {
-        socket.destroy();
-        reject(new Error('控制 socket 連接逾時'));
-      }, 8000);
+      controlSocket.on('connect', () => log.info('[ScrcpyManager] 控制 socket 已連接'));
 
-      socket.on('connect', () => {
-        clearTimeout(timeout);
-        this.controlSocket = socket;
-        log.info('[ScrcpyManager] 控制 socket 已連接');
-        resolve();
+      controlSocket.on('error', (err) => {
+        if (!headerDone) fail(err);
       });
 
-      socket.on('error', (err) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
-
-      socket.on('close', () => {
+      controlSocket.on('close', () => {
         log.warn('[ScrcpyManager] 控制 socket 已關閉');
         this.controlSocket = null;
       });

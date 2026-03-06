@@ -137,10 +137,21 @@ class StreamingService extends ChangeNotifier {
     if (message is String) {
       try {
         final data = jsonDecode(message);
-        
+        debugPrint('[StreamingService] 收到文字訊息 type=${data['type']} data=$data');
+
         switch (data['type']) {
           case 'welcome':
-            debugPrint('Welcome: ${data}');
+            debugPrint('[StreamingService] 歡迎訊息：pcId=${data['pcId']}');
+            break;
+          case 'connected':
+            debugPrint('[StreamingService] 連線確認：emulatorType=${data['emulatorType']} screenSize=${data['screenSize']}');
+            final size = data['screenSize'];
+            if (size != null) {
+              _screenWidth  = (size['width']  as num?)?.toInt() ?? _screenWidth;
+              _screenHeight = (size['height'] as num?)?.toInt() ?? _screenHeight;
+              debugPrint('[StreamingService] 螢幕大小已更新：${_screenWidth}x$_screenHeight');
+              notifyListeners();
+            }
             break;
           case 'stats':
             _latency = data['latency'] ?? 0;
@@ -149,20 +160,26 @@ class StreamingService extends ChangeNotifier {
             notifyListeners();
             break;
           case 'screen-size':
-            _screenWidth = data['width'] ?? 1080;
+            _screenWidth  = data['width']  ?? 1080;
             _screenHeight = data['height'] ?? 1920;
+            debugPrint('[StreamingService] screen-size 更新：${_screenWidth}x$_screenHeight');
             notifyListeners();
             break;
           case 'error':
-            debugPrint('Server error: ${data['message']}');
+            debugPrint('[StreamingService] ❌ Server 錯誤：${data['message']}');
             break;
+          default:
+            debugPrint('[StreamingService] ⚠️ 未處理的訊息類型：${data['type']}');
         }
       } catch (e) {
-        debugPrint('JSON parse error: $e');
+        debugPrint('[StreamingService] ❌ JSON 解析失敗：$e  raw=$message');
       }
     } else if (message is List<int>) {
       // 二進制消息 - 影片幀
+      debugPrint('[StreamingService] 收到 binary 幀，長度=${message.length}');
       _handleVideoFrame(Uint8List.fromList(message));
+    } else {
+      debugPrint('[StreamingService] ⚠️ 未知訊息類型：${message.runtimeType}');
     }
   }
 
@@ -170,34 +187,38 @@ class StreamingService extends ChangeNotifier {
    * 處理影片幀
    */
   void _handleVideoFrame(Uint8List data) {
-    // 檢查幀類型
-    if (data.isEmpty) return;
-    
+    if (data.isEmpty) {
+      debugPrint('[StreamingService] ⚠️ 收到空的 binary 幀');
+      return;
+    }
+
     final frameType = data[0];
-    
+    debugPrint('[StreamingService] 幀類型=0x${frameType.toRadixString(16).padLeft(2, '0')} 長度=${data.length}');
+
     if (frameType == 0x01) {
-      // JPEG 影片幀
       final jpegData = data.sublist(1);
       _displayJpegFrame(jpegData);
     } else if (frameType == 0x02) {
-      // 截圖幀
       final jpegData = data.sublist(1);
       _displayJpegFrame(jpegData);
-      // 觸發截圖回調
       _handleScreenshot(jpegData);
     } else if (data.length > 4) {
-      // 可能是長度前綴的幀
-      // 嘗試解析長度
+      debugPrint('[StreamingService] ⚠️ 未知幀類型 0x${frameType.toRadixString(16)}，嘗試長度前綴解析');
       try {
         final length = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+        debugPrint('[StreamingService] 長度前綴解析：宣告長度=$length 實際長度=${data.length}');
         if (data.length >= length + 4) {
-          final frameData = data.sublist(4, 4 + length);
-          _displayJpegFrame(frameData);
+          _displayJpegFrame(data.sublist(4, 4 + length));
+        } else {
+          debugPrint('[StreamingService] ❌ 長度前綴不符，改用原始資料');
+          _displayJpegFrame(data);
         }
       } catch (e) {
-        // 嘗試作為原始 JPEG 處理
+        debugPrint('[StreamingService] ❌ 長度前綴解析失敗：$e');
         _displayJpegFrame(data);
       }
+    } else {
+      debugPrint('[StreamingService] ❌ 無法識別的幀格式，首4bytes=${data.take(4).map((b) => '0x${b.toRadixString(16).padLeft(2,'0')}').join(' ')}');
     }
   }
 
@@ -205,22 +226,32 @@ class StreamingService extends ChangeNotifier {
    * 顯示影像幀 (支援 JPEG / PNG)
    */
   void _displayJpegFrame(Uint8List frameData) {
-    if (frameData.length < 4) return;
+    if (frameData.length < 4) {
+      debugPrint('[StreamingService] ❌ 幀資料過短：${frameData.length} bytes');
+      return;
+    }
 
-    // 接受 JPEG (FF D8) 或 PNG (89 50 4E 47)
     final isJpeg = frameData[0] == 0xFF && frameData[1] == 0xD8;
     final isPng  = frameData[0] == 0x89 && frameData[1] == 0x50;
 
     if (!isJpeg && !isPng) {
-      // 嘗試在資料中找到 JPEG 起始標記
+      debugPrint('[StreamingService] ⚠️ 幀不是 JPEG/PNG，首2bytes=0x${frameData[0].toRadixString(16)} 0x${frameData[1].toRadixString(16)}，嘗試搜尋 JPEG 標記');
+      bool found = false;
       for (int i = 0; i < frameData.length - 1; i++) {
         if (frameData[i] == 0xFF && frameData[i + 1] == 0xD8) {
           frameData = frameData.sublist(i);
+          debugPrint('[StreamingService] 在 offset=$i 找到 JPEG 標記');
+          found = true;
           break;
         }
       }
+      if (!found) {
+        debugPrint('[StreamingService] ❌ 找不到 JPEG 標記，丟棄此幀');
+        return;
+      }
     }
 
+    debugPrint('[StreamingService] ✅ 顯示幀 ${isJpeg ? 'JPEG' : isPng ? 'PNG' : 'JPEG(搜尋)'} ${frameData.length} bytes');
     _currentJpegData = frameData;
     notifyListeners();
   }

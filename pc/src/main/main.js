@@ -2,7 +2,6 @@ const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electr
 const path = require('path');
 const net = require('net');
 const util = require('util');
-const { AdbClient } = require('adbkit');
 const { WebSocketServer } = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const log = require('electron-log/main');
@@ -404,9 +403,11 @@ async function handleClientMessage(clientId, ws, data) {
           }));
         }
       } else {
+        const screenSize = touchHandler ? await touchHandler.updateScreenSize() : null;
         ws.send(JSON.stringify({
           type: 'connected',
-          emulatorType: deviceManager?.primaryDevice?.emulatorType || 'unknown'
+          emulatorType: deviceManager?.primaryDevice?.emulatorType || 'unknown',
+          screenSize,
         }));
       }
       break;
