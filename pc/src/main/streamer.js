@@ -14,6 +14,8 @@
  */
 
 const { spawn, exec } = require('child_process');
+const fs   = require('fs');
+const path = require('path');
 const WebSocket = require('ws');
 const log = require('electron-log');
 
@@ -387,18 +389,45 @@ class Streamer {
   // ffmpeg 偵測
   // ─────────────────────────────────────────
 
+  /**
+   * 偵測可用的 ffmpeg 二進制，優先順序：
+   *   1. 內建 ffmpeg-static（打包進安裝包，使用者不需要自行安裝）
+   *   2. 系統 PATH 中的 ffmpeg（系統已安裝的版本）
+   *
+   * 在 Electron 打包後，ffmpeg-static 的二進制位於 app.asar.unpacked/
+   * 目錄下（透過 electron-builder asarUnpack 設定），需修正路徑。
+   */
   _detectFfmpeg() {
+    // 1. 嘗試內建 ffmpeg-static
+    try {
+      let bundled = require('ffmpeg-static');
+      if (bundled) {
+        // 打包後路徑修正：app.asar → app.asar.unpacked
+        bundled = bundled.replace(
+          /\.asar([/\\])/g,
+          '.asar.unpacked$1'
+        );
+        if (fs.existsSync(bundled)) {
+          this._ffmpegPath = bundled;
+          this._ffmpegChecked = true;
+          log.info('[Streamer] 使用內建 ffmpeg：', bundled);
+          return;
+        }
+      }
+    } catch (_) {
+      // ffmpeg-static 未安裝（開發環境可能尚未 npm install）
+    }
+
+    // 2. 回退：偵測系統 PATH 中的 ffmpeg
     const cmd = process.platform === 'win32' ? 'where ffmpeg' : 'which ffmpeg';
     exec(cmd, (err, stdout) => {
       this._ffmpegChecked = true;
       if (!err && stdout.trim()) {
-        // 取第一行（Windows where 可能回傳多行）
         this._ffmpegPath = stdout.trim().split('\n')[0].trim();
-        log.info('[Streamer] 偵測到 ffmpeg：', this._ffmpegPath);
+        log.info('[Streamer] 使用系統 ffmpeg：', this._ffmpegPath);
       } else {
         this._ffmpegPath = null;
-        log.warn('[Streamer] 未偵測到 ffmpeg，scrcpy 影像需要 ffmpeg 才能解碼');
-        log.warn('[Streamer] 下載：https://ffmpeg.org/download.html');
+        log.warn('[Streamer] 未找到 ffmpeg（內建與系統皆無）');
       }
     });
   }

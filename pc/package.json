@@ -22,6 +22,7 @@
     "adbkit-monkey": "~1.0.1",
     "bonjour": "^3.5.1",
     "electron-log": "^5.0.0",
+    "ffmpeg-static": "^5.2.0",
     "iconv-lite": "^0.6.3",
     "qrcode": "^1.5.4",
     "uuid": "^9.0.0",
@@ -45,6 +46,9 @@
           "**/*"
         ]
       }
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
     ],
     "win": {
       "target": "nsis"
