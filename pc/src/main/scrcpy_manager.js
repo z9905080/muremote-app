@@ -312,14 +312,20 @@ class ScrcpyManager extends EventEmitter {
    * scrcpy 2.x 的 tunnel_forward 協議：
    *   1. server 接受第一個連接（影像）
    *   2. server 接受第二個連接（控制）
-   *   3. 兩個連接都就緒後，server 才在影像 socket 送出 72 bytes header
+   *   3. 兩個連接都就緒後，server 才在影像 socket 送出 76 bytes header
+   *
+   * scrcpy 2.x header 格式（76 bytes）：
+   *   bytes  0-63 : device name (64 bytes)
+   *   bytes 64-67 : codec_id (4 bytes, e.g. 'h264' = 0x68323634)
+   *   bytes 68-71 : width (4 bytes)
+   *   bytes 72-75 : height (4 bytes)
    *
    * 若依序連接（先等影像 header 再連控制），會造成雙方互相等待的 deadlock。
    * 解法：同時發起兩個連接，再等待影像 header。
    */
   _connectSockets() {
     return new Promise((resolve, reject) => {
-      const HEADER_SIZE = 72;
+      const HEADER_SIZE = 76;  // scrcpy 2.x: 64(name) + 4(codec_id) + 4(width) + 4(height)
       let headerBuf = Buffer.alloc(0);
       let headerDone = false;
       let rejected = false;
@@ -353,9 +359,10 @@ class ScrcpyManager extends EventEmitter {
           headerDone = true;
 
           this.deviceName  = headerBuf.slice(0, 64).toString('utf8').replace(/\0/g, '');
-          this.videoWidth  = headerBuf.readUInt32BE(64);
-          this.videoHeight = headerBuf.readUInt32BE(68);
-          log.info(`[ScrcpyManager] 設備：${this.deviceName} ${this.videoWidth}x${this.videoHeight}`);
+          const codecId    = headerBuf.readUInt32BE(64);  // e.g. 0x68323634 = 'h264'
+          this.videoWidth  = headerBuf.readUInt32BE(68);
+          this.videoHeight = headerBuf.readUInt32BE(72);
+          log.info(`[ScrcpyManager] 設備：${this.deviceName} ${this.videoWidth}x${this.videoHeight} codec=0x${codecId.toString(16)}`);
 
           const rest = headerBuf.slice(HEADER_SIZE);
           if (rest.length > 0) this.emit('video-data', rest);

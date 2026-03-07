@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm list:*)",
+      "Bash(rm:*)",
+      "Bash(pnpm audit:*)",
+      "Bash(pnpm build:*)",
+      "WebSearch"
+    ]
+  }
+}

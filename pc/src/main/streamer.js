@@ -59,6 +59,13 @@ class Streamer {
     this._ffmpegPath = null;
     this._ffmpegChecked = false;
     this._detectFfmpeg();
+
+    // H.264 關鍵幀快取：保存最新的 SPS / PPS / IDR NAL unit。
+    // ffmpeg 啟動時先寫入 SPS+PPS+IDR，讓它能立即解碼第一幀，
+    // 避免等到下一個 IDR（最長可能要等幾十秒）才開始顯示畫面。
+    this._spsNal = null;  // 最新的 SPS（含 4-byte 起始碼）
+    this._ppsNal = null;  // 最新的 PPS（含 4-byte 起始碼）
+    this._idrNal = null;  // 最新的 IDR（含 4-byte 起始碼）
   }
 
   // ─────────────────────────────────────────
@@ -67,10 +74,70 @@ class Streamer {
 
   /**
    * 由 main.js 在初始化 ScrcpyManager 後呼叫。
+   * 立即開始監聽 video-data 以緩存 SPS+PPS+IDR，
+   * 這樣客戶端連線時 ffmpeg 能立刻取得關鍵幀資料。
    */
   setScrcpyManager(manager) {
+    if (this.scrcpyManager) {
+      this.scrcpyManager.removeAllListeners('video-data');
+    }
     this.scrcpyManager = manager;
+
+    manager.on('video-data', (chunk) => {
+      // 持續偵測並緩存最新的 SPS/PPS NAL units
+      this._cacheNalUnits(chunk);
+
+      // 若串流中，將資料餵給 ffmpeg
+      if (this.isStreaming && this._ffmpegProc) {
+        try { this._ffmpegProc.stdin.write(chunk); } catch (_) {}
+      }
+    });
+
     log.info('[Streamer] ScrcpyManager 已注入，將使用 scrcpy 高效串流');
+  }
+
+  /**
+   * 掃描 H.264 chunk，偵測並緩存最新的 SPS（NAL type 7）與 PPS（NAL type 8）。
+   * 這兩個 NAL unit 是 ffmpeg 解碼所必需的 codec 參數（"非環形緩存"方案）。
+   * 找到新的 SPS/PPS 時覆蓋舊值，其他 NAL 不影響緩存。
+   */
+  _cacheNalUnits(chunk) {
+    let i = 0;
+    while (i <= chunk.length - 5) {  // 至少需要 4 bytes 起始碼 + 1 byte NAL header
+      if (chunk[i] === 0x00 && chunk[i+1] === 0x00 &&
+          chunk[i+2] === 0x00 && chunk[i+3] === 0x01) {
+        const nalType = chunk[i+4] & 0x1F;
+        // 找下一個起始碼的位置（即本 NAL 的結束）
+        const nextStart = this._findNextStartCode(chunk, i + 4);
+        if (nalType === 7) {        // SPS：新 GOP 開始，重置 PPS/IDR
+          this._spsNal = chunk.slice(i, nextStart);
+          this._ppsNal = null;
+          this._idrNal = null;
+        } else if (nalType === 8) { // PPS：重置 IDR
+          this._ppsNal = chunk.slice(i, nextStart);
+          this._idrNal = null;
+        } else if (nalType === 5 && this._spsNal && this._ppsNal) { // IDR（在 SPS+PPS 之後）
+          this._idrNal = chunk.slice(i, nextStart);
+        }
+        i = nextStart;
+      } else {
+        i++;
+      }
+    }
+  }
+
+  /**
+   * 從 buf 的 from 位置開始，找下一個 4-byte 起始碼（00 00 00 01）的位置。
+   * 找不到時回傳 buf.length（表示到結尾）。
+   */
+  _findNextStartCode(buf, from) {
+    for (let i = from; i <= buf.length - 4; i++) {
+      if (buf[i] === 0x00 && buf[i+1] === 0x00 &&
+          buf[i+2] === 0x00 && buf[i+3] === 0x01) {
+        return i;
+      }
+    }
+    return buf.length;
   }
 
   async startStream(ws) {
@@ -118,10 +185,8 @@ class Streamer {
     // 停止 ffmpeg 程序
     this._stopFfmpeg();
 
-    // 移除 scrcpy video-data 監聽
-    if (this.scrcpyManager) {
-      this.scrcpyManager.removeAllListeners('video-data');
-    }
+    // 不移除 video-data 監聽：setScrcpyManager 的持久監聽負責緩存關鍵幀，
+    // 需要持續運作，等下次客戶端連線時使用。
 
     this.clients.clear();
     this.stats = { fps: 0, latency: 0, framesSent: 0, latencySamples: [] };
@@ -190,22 +255,31 @@ class Streamer {
     // 啟動 ffmpeg：stdin 接收 H.264，stdout 輸出連續 JPEG 幀
     const ffmpegBin = this._ffmpegPath.replace(/^"|"$/g, '');
     this._ffmpegProc = spawn(ffmpegBin, [
-      '-loglevel', 'quiet',
-      '-f',        'h264',      // 輸入格式：raw H.264 Annex B
-      '-i',        'pipe:0',    // 從 stdin 讀取
-      '-vf',       `fps=${this.config.fps}`,
-      '-f',        'image2pipe',
-      '-vcodec',   'mjpeg',
-      '-q:v',      '5',         // JPEG 品質 1-31，值越低越好（5 ≈ 75% 品質）
-      'pipe:1',                 // 輸出到 stdout
+      '-loglevel',        'warning',
+      '-probesize',       '32',      // 不探測輸入，立即開始解碼
+      '-analyzeduration', '0',       // 無分析延遲
+      '-f',               'h264',    // 輸入格式：raw H.264 Annex B
+      '-i',               'pipe:0',  // 從 stdin 讀取
+      '-f',               'image2pipe',
+      '-vcodec',          'mjpeg',
+      '-q:v',             '5',       // JPEG 品質 1-31，值越低越好（5 ≈ 75% 品質）
+      'pipe:1',                      // 輸出到 stdout
     ]);
 
+    let _ffmpegFirstOutput = false;
     this._ffmpegProc.stdout.on('data', (chunk) => {
+      if (!_ffmpegFirstOutput) {
+        _ffmpegFirstOutput = true;
+        log.info('[Streamer] ffmpeg 首個輸出，長度：', chunk.length);
+      }
       this._ffmpegStdout = Buffer.concat([this._ffmpegStdout, chunk]);
       this._extractAndBroadcastJpegFrames();
     });
 
-    this._ffmpegProc.stderr.on('data', () => {});  // 已用 -loglevel quiet 抑制輸出
+    this._ffmpegProc.stderr.on('data', (d) => {
+      const msg = d.toString().trim();
+      if (msg) log.warn('[ffmpeg]', msg);
+    });
 
     this._ffmpegProc.on('error', (err) => {
       log.error('[Streamer] ffmpeg 錯誤：', err.message);
@@ -218,14 +292,20 @@ class Streamer {
       this._ffmpegProc = null;
     });
 
-    // 監聽 scrcpy 的 H.264 資料，直接寫入 ffmpeg stdin
-    this.scrcpyManager.on('video-data', (chunk) => {
-      if (!this.isStreaming || !this._ffmpegProc) return;
-      try {
-        this._ffmpegProc.stdin.write(chunk);
-      } catch (_) {}
-    });
+    // 先送出緩存的 SPS+PPS+IDR，讓 ffmpeg 能立即解碼第一幀
+    if (this._spsNal && this._ppsNal && this._idrNal) {
+      const gop = Buffer.concat([this._spsNal, this._ppsNal, this._idrNal]);
+      log.info(`[Streamer] 送出緩存 SPS(${this._spsNal.length}B)+PPS(${this._ppsNal.length}B)+IDR(${this._idrNal.length}B)`);
+      try { this._ffmpegProc.stdin.write(gop); } catch (_) {}
+    } else if (this._spsNal && this._ppsNal) {
+      const header = Buffer.concat([this._spsNal, this._ppsNal]);
+      log.info(`[Streamer] 送出緩存 SPS+PPS（無 IDR），等待下一個關鍵幀`);
+      try { this._ffmpegProc.stdin.write(header); } catch (_) {}
+    } else {
+      log.warn('[Streamer] 尚無緩存 SPS/PPS，等待 scrcpy 送出關鍵幀');
+    }
 
+    // video-data 已由 setScrcpyManager() 統一處理，不需要再次監聽
     log.info('[Streamer] scrcpy + ffmpeg 管道已建立');
   }
 
