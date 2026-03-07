@@ -276,6 +276,10 @@
         <span class="info-label">串流狀態</span>
         <span class="info-value" id="stream-status">待機中</span>
       </div>
+      <div class="info-row">
+        <span class="info-label">串流模式</span>
+        <span class="info-value" id="stream-mode">-</span>
+      </div>
     </div>
     
     <div class="qr-section">
@@ -359,6 +363,20 @@
           streamEl.className = 'info-value';
         }
       } catch (e) { console.error('getStreamStatus:', e); }
+      try {
+        const { mode } = await window.electronAPI.getStreamMode();
+        const modeEl = document.getElementById('stream-mode');
+        if (mode === 'legacy') {
+          modeEl.textContent = 'legacy';
+          modeEl.className = 'info-value warning';
+        } else if (mode === 'webrtc') {
+          modeEl.textContent = 'stream';
+          modeEl.className = 'info-value success';
+        } else {
+          modeEl.textContent = '-';
+          modeEl.className = 'info-value';
+        }
+      } catch (e) { console.error('getStreamMode:', e); }
       try {
         const localIp = await window.electronAPI.getLocalIp();
         if (localIp) document.getElementById('local-ip').textContent = localIp;

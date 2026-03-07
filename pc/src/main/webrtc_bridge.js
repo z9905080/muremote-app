@@ -103,15 +103,28 @@ class WebRTCBridge {
       pc.addTrack(track, stream);
 
       pc.onicecandidate = (event) => {
-        if (!event.candidate) return;
+        if (!event.candidate) {
+          log.info('[WebRTCBridge] ICE gathering complete');
+          return;
+        }
+        log.info(`[WebRTCBridge] ICE candidate: ${event.candidate.candidate?.split(' ').slice(0, 8).join(' ')}`);
         this._send(ws, {
           type: 'webrtc-ice-candidate',
           candidate: event.candidate,
         });
       };
 
+      pc.onicegatheringstatechange = () => {
+        log.info(`[WebRTCBridge] ICE gathering state: ${pc.iceGatheringState}`);
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        log.info(`[WebRTCBridge] ICE connection state: ${pc.iceConnectionState}`);
+      };
+
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
+        log.info(`[WebRTCBridge] connection state: ${st}`);
         if (st === 'failed' || st === 'closed' || st === 'disconnected') {
           this.stopSession(clientId);
         }

@@ -677,6 +677,7 @@ class StreamingService extends ChangeNotifier {
     });
 
     _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
+      debugPrint('[StreamingService] local ICE candidate: ${candidate.candidate?.split(' ').take(8).join(' ')}');
       _ws?.add(jsonEncode({
         'type': 'webrtc-ice-candidate',
         'candidate': candidate.toMap(),
@@ -684,21 +685,28 @@ class StreamingService extends ChangeNotifier {
     };
 
     _peerConnection!.onTrack = (RTCTrackEvent event) {
+      debugPrint('[StreamingService] onTrack! track=${event.track?.kind} streams=${event.streams.length}');
       if (event.streams.isNotEmpty) {
-        _remoteRenderer?.srcObject = event.streams.first;
+        final stream = event.streams.first;
+        debugPrint('[StreamingService] setting srcObject from stream, videoTracks=${stream.getVideoTracks().length}');
+        _remoteRenderer?.srcObject = stream;
         _isWebRtcStreaming = true;
         notifyListeners();
       } else if (event.track != null) {
+        debugPrint('[StreamingService] no streams, creating local stream for track');
         createLocalMediaStream('remote').then((stream) {
           stream.addTrack(event.track);
           _remoteRenderer?.srcObject = stream;
           _isWebRtcStreaming = true;
           notifyListeners();
         });
+      } else {
+        debugPrint('[StreamingService] onTrack: no track and no streams!');
       }
     };
 
     _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
+      debugPrint('[StreamingService] ICE connection state: $state');
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
         _isWebRtcStreaming = true;
