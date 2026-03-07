@@ -24,8 +24,8 @@ class WebRTCBridge {
     this._frameSize = 0;
     this._spsNal = null;
     this._ppsNal = null;
-    this._idrNal = null;
     this._decodedFrameCount = 0;
+    this._lastStartFailureReason = '';
   }
 
   _tryLoadWrtc() {
@@ -46,6 +46,10 @@ class WebRTCBridge {
 
   isSupported() {
     return this._supported;
+  }
+
+  getLastStartFailureReason() {
+    return this._lastStartFailureReason;
   }
 
   setScrcpyManager(manager) {
@@ -70,17 +74,22 @@ class WebRTCBridge {
 
   async startSession(clientId, ws) {
     if (!this._supported || !this.scrcpyManager?.isRunning) {
+      this._lastStartFailureReason = !this._supported
+        ? 'wrtc-not-supported'
+        : 'scrcpy-not-running';
       return false;
     }
 
     try {
       await this._ensureDecoderRunning();
       if (!this._decoderProc || this._frameSize <= 0) {
+        this._lastStartFailureReason = 'decoder-not-ready';
         return false;
       }
-      const hasDecodedFrame = await this._waitForDecodedFrame(3000);
+      const hasDecodedFrame = await this._waitForDecodedFrame(35000);
       if (!hasDecodedFrame) {
-        log.warn('[WebRTCBridge] no decoded frame within 3s, fallback to legacy stream');
+        log.warn('[WebRTCBridge] no decoded frame within 35s, fallback to legacy stream');
+        this._lastStartFailureReason = 'no-decoded-frame-within-35s';
         return false;
       }
 
@@ -90,7 +99,8 @@ class WebRTCBridge {
 
       const source = new this._wrtc.nonstandard.RTCVideoSource();
       const track = source.createTrack();
-      pc.addTrack(track);
+      const stream = new this._wrtc.MediaStream([track]);
+      pc.addTrack(track, stream);
 
       pc.onicecandidate = (event) => {
         if (!event.candidate) return;
@@ -119,10 +129,12 @@ class WebRTCBridge {
         sdp: pc.localDescription,
       });
 
+      this._lastStartFailureReason = '';
       log.info(`[WebRTCBridge] WebRTC offer sent to client=${clientId}`);
       return true;
     } catch (e) {
       log.error('[WebRTCBridge] startSession failed:', e.message);
+      this._lastStartFailureReason = `start-session-error:${e.message}`;
       this.stopSession(clientId);
       return false;
     }
@@ -231,28 +243,25 @@ class WebRTCBridge {
       log.error('[WebRTCBridge] decoder error:', err.message);
     });
 
-    if (this._spsNal && this._ppsNal && this._idrNal) {
-      try {
-        this._decoderProc.stdin.write(Buffer.concat([this._spsNal, this._ppsNal, this._idrNal]));
-      } catch (_) {}
-    } else if (this._spsNal && this._ppsNal) {
+    // Feed cached SPS+PPS so ffmpeg can parse the stream immediately;
+    // IDR is NOT sent from cache as it may be incomplete (split across TCP reads).
+    // ffmpeg will sync on the next complete keyframe from the live stream.
+    if (this._spsNal && this._ppsNal) {
       try {
         this._decoderProc.stdin.write(Buffer.concat([this._spsNal, this._ppsNal]));
       } catch (_) {}
-    } else {
-      log.warn('[WebRTCBridge] missing cached SPS/PPS; waiting for next keyframe');
     }
 
     log.info(`[WebRTCBridge] decoder started ${this._frameWidth}x${this._frameHeight}`);
     setTimeout(() => {
       if (this._decoderProc && this._decodedFrameCount === startDecoded) {
-        log.warn('[WebRTCBridge] decoder has not produced any frame in 3s');
+        log.warn('[WebRTCBridge] decoder has not produced any frame in 10s');
       }
-    }, 3000);
+    }, 10000);
   }
 
   _drainRawFrames() {
-    if (this._frameSize <= 0 || this.sessions.size === 0) return;
+    if (this._frameSize <= 0) return;
 
     while (this._decoderStdout.length >= this._frameSize) {
       const frame = this._decoderStdout.subarray(0, this._frameSize);
@@ -262,6 +271,7 @@ class WebRTCBridge {
         log.info('[WebRTCBridge] decoder produced first raw frame');
       }
 
+      if (this.sessions.size === 0) continue;
       for (const [, s] of this.sessions) {
         try {
           s.source.onFrame({
@@ -295,12 +305,8 @@ class WebRTCBridge {
         if (nalType === 7) {
           this._spsNal = chunk.slice(i, nextStart);
           this._ppsNal = null;
-          this._idrNal = null;
         } else if (nalType === 8) {
           this._ppsNal = chunk.slice(i, nextStart);
-          this._idrNal = null;
-        } else if (nalType === 5 && this._spsNal && this._ppsNal) {
-          this._idrNal = chunk.slice(i, nextStart);
         }
         i = nextStart;
       } else {

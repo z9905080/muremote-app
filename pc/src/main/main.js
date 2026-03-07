@@ -35,6 +35,8 @@ let webrtcBridge = null;
 let connectedClients = new Map();
 let pcId = uuidv4().substring(0, 8).toUpperCase();
 let hasShownTrayHint = false;
+let lastStreamMode = 'unknown';
+let lastStreamModeReason = '';
 
 log.transports.file.level = 'info';
 // 明確設定 log 檔案路徑，確保寫入已知位置
@@ -477,15 +479,23 @@ async function handleClientMessage(clientId, ws, data) {
       if (webrtcBridge && webrtcBridge.isSupported()) {
         const ok = await webrtcBridge.startSession(clientId, ws);
         if (ok) {
+          lastStreamMode = 'webrtc';
+          lastStreamModeReason = '';
           ws.send(JSON.stringify({ type: 'stream-mode', mode: 'webrtc' }));
           break;
         }
       }
 
       if (streamer) {
+        lastStreamMode = 'legacy';
+        lastStreamModeReason = webrtcBridge?.getLastStartFailureReason?.() || 'webrtc-not-selected';
         streamer.addClient(ws);
         await streamer.startStream(ws);
-        ws.send(JSON.stringify({ type: 'stream-mode', mode: 'legacy' }));
+        ws.send(JSON.stringify({
+          type: 'stream-mode',
+          mode: 'legacy',
+          reason: lastStreamModeReason,
+        }));
       }
       break;
 
@@ -497,6 +507,8 @@ async function handleClientMessage(clientId, ws, data) {
       if (streamer) {
         streamer.stopStream();
       }
+      lastStreamMode = 'stopped';
+      lastStreamModeReason = '';
       break;
 
     case 'get-stats':
@@ -663,6 +675,9 @@ ipcMain.handle('get-adb-version', () => {
 });
 ipcMain.handle('get-stream-status', () => {
   return streamer?.isStreaming ? 'active' : 'standby';
+});
+ipcMain.handle('get-stream-mode', () => {
+  return { mode: lastStreamMode, reason: lastStreamModeReason };
 });
 ipcMain.handle('get-local-ip', () => {
   const os = require('os');

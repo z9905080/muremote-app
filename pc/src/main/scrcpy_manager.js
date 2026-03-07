@@ -276,6 +276,7 @@ class ScrcpyManager extends EventEmitter {
       `max_fps=${maxFps}`,
       `video_bit_rate=${bitRate}`,
       'video_codec=h264',
+      'video_codec_options=i-frame-interval=1',
       'cleanup=true',
       'stay_awake=false',
     ].join(' ');

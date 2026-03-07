@@ -23,6 +23,8 @@ class StreamingService extends ChangeNotifier {
   bool _isConnecting = false;
   bool _isStreaming = false;
   bool _isWebRtcStreaming = false;
+  String _streamMode = 'unknown';
+  String _streamModeReason = '';
   int _latency = 0;
   int _fps = 0;
   String _resolution = '720p';
@@ -67,6 +69,8 @@ class StreamingService extends ChangeNotifier {
   String get quality => _quality;
   String get serverUrl => _serverUrl;
   bool get isWebRtcStreaming => _isWebRtcStreaming;
+  String get streamMode => _streamMode;
+  String get streamModeReason => _streamModeReason;
   RTCVideoRenderer? get remoteRenderer => _remoteRenderer;
 
   StreamingService() {
@@ -181,8 +185,11 @@ class StreamingService extends ChangeNotifier {
             notifyListeners();
             break;
           case 'stream-mode':
-            _isWebRtcStreaming = data['mode'] == 'webrtc';
-            debugPrint('[StreamingService] stream mode=${data['mode']}');
+            _streamMode = (data['mode'] ?? 'unknown').toString();
+            _streamModeReason = (data['reason'] ?? '').toString();
+            _isWebRtcStreaming = _streamMode == 'webrtc';
+            debugPrint(
+                '[StreamingService] stream mode=$_streamMode reason=$_streamModeReason');
             notifyListeners();
             break;
           case 'webrtc-offer':
@@ -333,6 +340,8 @@ class StreamingService extends ChangeNotifier {
 
     _isStreaming = true;
     _isWebRtcStreaming = false;
+    _streamMode = 'starting';
+    _streamModeReason = '';
     notifyListeners();
 
     // 請求螢幕大小
@@ -364,6 +373,8 @@ class StreamingService extends ChangeNotifier {
 
     _isStreaming = false;
     _isWebRtcStreaming = false;
+    _streamMode = 'stopped';
+    _streamModeReason = '';
     _currentJpegData = null;
     _latency = 0;
     notifyListeners();
@@ -546,6 +557,8 @@ class StreamingService extends ChangeNotifier {
     await _disposePeerConnection();
     _isConnected = false;
     _isConnecting = false;
+    _streamMode = 'disconnected';
+    _streamModeReason = '';
     _pcId = '';
     _currentJpegData = null;
 
@@ -673,14 +686,16 @@ class StreamingService extends ChangeNotifier {
     _peerConnection!.onTrack = (RTCTrackEvent event) {
       if (event.streams.isNotEmpty) {
         _remoteRenderer?.srcObject = event.streams.first;
+        _isWebRtcStreaming = true;
+        notifyListeners();
       } else if (event.track != null) {
         createLocalMediaStream('remote').then((stream) {
           stream.addTrack(event.track);
           _remoteRenderer?.srcObject = stream;
+          _isWebRtcStreaming = true;
+          notifyListeners();
         });
       }
-      _isWebRtcStreaming = true;
-      notifyListeners();
     };
 
     _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {

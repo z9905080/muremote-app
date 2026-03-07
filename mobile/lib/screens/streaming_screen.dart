@@ -307,24 +307,35 @@ class _StreamingScreenState extends State<StreamingScreen>
         color: Colors.black54,
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: latColor),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration:
+                    BoxDecoration(shape: BoxShape.circle, color: latColor),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                '${lat}ms',
+                style: TextStyle(
+                    color: latColor, fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${svc.serverFps}fps',
+                style: const TextStyle(color: Colors.white60, fontSize: 11),
+              ),
+            ],
           ),
-          const SizedBox(width: 5),
+          const SizedBox(height: 2),
           Text(
-            '${lat}ms',
-            style: TextStyle(
-                color: latColor, fontSize: 11, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '${svc.serverFps}fps',
-            style: const TextStyle(color: Colors.white60, fontSize: 11),
+            'mode: ${svc.streamMode}',
+            style: const TextStyle(color: Colors.white60, fontSize: 10),
           ),
         ],
       ),
@@ -346,6 +357,12 @@ class _StreamingScreenState extends State<StreamingScreen>
           Text(
             '${svc.latency}ms · ${svc.serverFps}fps',
             style: const TextStyle(color: Colors.white38, fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'mode: ${svc.streamMode}'
+            '${svc.streamModeReason.isNotEmpty ? ' (${svc.streamModeReason})' : ''}',
+            style: const TextStyle(color: Colors.white38, fontSize: 11),
           ),
         ],
       ],

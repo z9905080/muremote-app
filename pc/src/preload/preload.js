@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAdbStatus: () => ipcRenderer.invoke('get-adb-status'),
   getAdbVersion: () => ipcRenderer.invoke('get-adb-version'),
   getStreamStatus: () => ipcRenderer.invoke('get-stream-status'),
+  getStreamMode: () => ipcRenderer.invoke('get-stream-mode'),
   getLocalIp: () => ipcRenderer.invoke('get-local-ip'),
   getQrCode: () => ipcRenderer.invoke('get-qr-code'),
 
