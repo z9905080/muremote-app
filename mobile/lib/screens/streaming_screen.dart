@@ -258,6 +258,51 @@ class _StreamingScreenState extends State<StreamingScreen>
             right: 0, top: 0, bottom: 0, width: _kEdgeStripWidth,
             child: _buildEdgeStrip(svc),
           ),
+
+          // ④ Stats HUD overlay (top-left of video, touch-transparent)
+          if (svc.isStreaming && svc.currentFrame != null)
+            Positioned(
+              left: 8,
+              top: 8,
+              child: IgnorePointer(child: _buildStatsHud(svc)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsHud(StreamingService svc) {
+    final lat = svc.latency;
+    final Color latColor = lat == 0
+        ? Colors.white38
+        : lat < 50
+            ? Colors.greenAccent
+            : lat < 100
+                ? Colors.yellowAccent
+                : Colors.redAccent;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6, height: 6,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: latColor),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            '${lat}ms',
+            style: TextStyle(color: latColor, fontSize: 11, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${svc.serverFps}fps',
+            style: const TextStyle(color: Colors.white60, fontSize: 11),
+          ),
         ],
       ),
     );
@@ -276,7 +321,7 @@ class _StreamingScreenState extends State<StreamingScreen>
         if (svc.isStreaming) ...[
           const SizedBox(height: 8),
           Text(
-            '${svc.latency}ms · ${svc.fps}fps',
+            '${svc.latency}ms · ${svc.serverFps}fps',
             style: const TextStyle(color: Colors.white38, fontSize: 12),
           ),
         ],
@@ -334,6 +379,15 @@ class _StreamingScreenState extends State<StreamingScreen>
   // ── Control panel ──────────────────────────────────────────────────────────
 
   Widget _buildControlPanel(StreamingService svc) {
+    final lat = svc.latency;
+    final Color latColor = lat == 0
+        ? Colors.white54
+        : lat < 50
+            ? Colors.greenAccent
+            : lat < 100
+                ? Colors.yellowAccent
+                : Colors.redAccent;
+
     return Container(
       color: const Color(0xCC1C1C1E),
       padding: const EdgeInsets.fromLTRB(12, 48, 12, 24),
@@ -350,14 +404,23 @@ class _StreamingScreenState extends State<StreamingScreen>
               ),
               const Spacer(),
               Text(
-                '${svc.latency}ms · ${svc.fps}fps',
-                style: const TextStyle(color: Colors.white54, fontSize: 11),
+                '${lat}ms',
+                style: TextStyle(color: latColor, fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '· ${svc.serverFps}fps',
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
               ),
             ],
           ),
           const SizedBox(height: 4),
           Text(svc.resolution, style: const TextStyle(color: Colors.white38, fontSize: 11)),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
+          _buildFpsSelector(svc),
+          const SizedBox(height: 10),
+          _buildQualitySelector(svc),
+          const SizedBox(height: 14),
           Expanded(
             child: GridView.count(
               crossAxisCount: 2,
@@ -404,6 +467,86 @@ class _StreamingScreenState extends State<StreamingScreen>
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildFpsSelector(StreamingService svc) {
+    const options = [15, 24, 30, 60];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('幀率', style: TextStyle(color: Colors.white38, fontSize: 10)),
+        const SizedBox(height: 5),
+        Row(
+          children: options.asMap().entries.map((entry) {
+            final fps = entry.value;
+            final isLast = entry.key == options.length - 1;
+            final selected = svc.fps == fps;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => svc.setFps(fps),
+                child: Container(
+                  margin: isLast ? EdgeInsets.zero : const EdgeInsets.only(right: 5),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: BoxDecoration(
+                    color: selected ? Colors.blueAccent : const Color(0xFF2C2C2E),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '$fps',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: selected ? Colors.white : Colors.white54,
+                      fontSize: 12,
+                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQualitySelector(StreamingService svc) {
+    const options = ['480p', '720p', '1080p'];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('畫質', style: TextStyle(color: Colors.white38, fontSize: 10)),
+        const SizedBox(height: 5),
+        Row(
+          children: options.asMap().entries.map((entry) {
+            final q = entry.value;
+            final isLast = entry.key == options.length - 1;
+            final selected = svc.quality == q;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => svc.setQuality(q),
+                child: Container(
+                  margin: isLast ? EdgeInsets.zero : const EdgeInsets.only(right: 5),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: BoxDecoration(
+                    color: selected ? Colors.blueAccent : const Color(0xFF2C2C2E),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    q,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: selected ? Colors.white : Colors.white54,
+                      fontSize: 12,
+                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 

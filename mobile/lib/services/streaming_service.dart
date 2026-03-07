@@ -44,6 +44,9 @@ class StreamingService extends ChangeNotifier {
   // 幀率設定
   int _setFps = 30;
   
+  // 延遲量測
+  Timer? _pingTimer;
+
   // 重連機制
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
@@ -55,6 +58,7 @@ class StreamingService extends ChangeNotifier {
   bool get isStreaming => _isStreaming;
   int get latency => _latency;
   int get fps => _setFps;
+  int get serverFps => _fps;
   String get resolution => _resolution;
   Uint8List? get currentFrame => _currentJpegData;
   int get screenWidth => _screenWidth;
@@ -153,10 +157,16 @@ class StreamingService extends ChangeNotifier {
               notifyListeners();
             }
             break;
+          case 'pong':
+            final ts = data['timestamp'] as int?;
+            if (ts != null) {
+              _latency = ((DateTime.now().millisecondsSinceEpoch - ts) / 2).round();
+              notifyListeners();
+            }
+            break;
           case 'stats':
-            _latency = data['latency'] ?? 0;
-            _fps = data['fps'] ?? 30;
-            _resolution = data['resolution'] ?? '720p';
+            _fps = (data['fps'] as num?)?.toInt() ?? _fps;
+            _resolution = data['resolution'] ?? _resolution;
             notifyListeners();
             break;
           case 'screen-size':
@@ -296,9 +306,18 @@ class StreamingService extends ChangeNotifier {
     notifyListeners();
 
     // 請求螢幕大小
-    _ws?.add(jsonEncode({
-      'type': 'get-screen-size'
-    }));
+    _ws?.add(jsonEncode({'type': 'get-screen-size'}));
+
+    // 啟動 ping 計時器，每 2 秒量測一次延遲
+    _pingTimer?.cancel();
+    _pingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_isConnected) {
+        _ws?.add(jsonEncode({
+          'type': 'ping',
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        }));
+      }
+    });
   }
 
   /**
@@ -307,12 +326,14 @@ class StreamingService extends ChangeNotifier {
   Future<void> stopStreaming() async {
     if (!_isStreaming) return;
 
-    _ws?.add(jsonEncode({
-      'type': 'stop-stream'
-    }));
+    _pingTimer?.cancel();
+    _pingTimer = null;
+
+    _ws?.add(jsonEncode({'type': 'stop-stream'}));
 
     _isStreaming = false;
     _currentJpegData = null;
+    _latency = 0;
     notifyListeners();
   }
 
@@ -497,6 +518,8 @@ class StreamingService extends ChangeNotifier {
    */
   Future<void> disconnect() async {
     _cancelReconnect();
+    _pingTimer?.cancel();
+    _pingTimer = null;
     await stopStreaming();
     
     _ws?.close();

@@ -421,10 +421,22 @@ async function handleClientMessage(clientId, ws, data) {
       log.info('Received ICE candidate');
       break;
 
+    case 'ping':
+      // 立即回應 pong，讓客戶端計算 RTT
+      ws.send(JSON.stringify({ type: 'pong', timestamp: data.timestamp }));
+      if (streamer && data.timestamp) {
+        streamer.reportLatency(data.timestamp);
+      }
+      break;
+
     case 'touch':
       // 觸控事件
       if (touchHandler) {
         await touchHandler.handleTouch(data);
+      }
+      // 順便更新延遲樣本
+      if (streamer && data.timestamp) {
+        streamer.reportLatency(data.timestamp);
       }
       break;
 
@@ -591,9 +603,9 @@ async function handleClientMessage(clientId, ws, data) {
 function sendStats(ws) {
   const stats = {
     type: 'stats',
-    latency: Math.floor(Math.random() * 50) + 30,
-    fps: 30,
-    resolution: '720p',
+    latency: streamer ? streamer.stats.latency : 0,
+    fps: streamer ? streamer.stats.fps : 0,
+    resolution: streamer ? `${streamer.config.width}x${streamer.config.height}` : '720x1280',
     connected: connectedClients.size > 0
   };
   ws.send(JSON.stringify(stats));
