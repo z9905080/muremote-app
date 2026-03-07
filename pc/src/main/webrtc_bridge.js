@@ -22,6 +22,10 @@ class WebRTCBridge {
     this._frameWidth = 0;
     this._frameHeight = 0;
     this._frameSize = 0;
+    this._spsNal = null;
+    this._ppsNal = null;
+    this._idrNal = null;
+    this._decodedFrameCount = 0;
   }
 
   _tryLoadWrtc() {
@@ -51,7 +55,9 @@ class WebRTCBridge {
 
     this.scrcpyManager = manager;
     this._onVideoData = (chunk) => {
-      if (!this._decoderProc || !chunk || chunk.length === 0) return;
+      if (!chunk || chunk.length === 0) return;
+      this._cacheNalUnits(chunk);
+      if (!this._decoderProc) return;
       try {
         this._decoderProc.stdin.write(chunk);
       } catch (_) {}
@@ -70,6 +76,11 @@ class WebRTCBridge {
     try {
       await this._ensureDecoderRunning();
       if (!this._decoderProc || this._frameSize <= 0) {
+        return false;
+      }
+      const hasDecodedFrame = await this._waitForDecodedFrame(3000);
+      if (!hasDecodedFrame) {
+        log.warn('[WebRTCBridge] no decoded frame within 3s, fallback to legacy stream');
         return false;
       }
 
@@ -183,9 +194,10 @@ class WebRTCBridge {
     this._frameHeight = this.scrcpyManager.videoHeight;
     this._frameSize = Math.floor(this._frameWidth * this._frameHeight * 1.5);
 
+    const startDecoded = this._decodedFrameCount;
     this._decoderProc = spawn(ffmpegPath.replace(/^"|"$/g, ''), [
       '-loglevel', 'warning',
-      '-probesize', '32',
+      '-probesize', '8192',
       '-analyzeduration', '0',
       '-fflags', 'nobuffer',
       '-flags', 'low_delay',
@@ -219,7 +231,24 @@ class WebRTCBridge {
       log.error('[WebRTCBridge] decoder error:', err.message);
     });
 
+    if (this._spsNal && this._ppsNal && this._idrNal) {
+      try {
+        this._decoderProc.stdin.write(Buffer.concat([this._spsNal, this._ppsNal, this._idrNal]));
+      } catch (_) {}
+    } else if (this._spsNal && this._ppsNal) {
+      try {
+        this._decoderProc.stdin.write(Buffer.concat([this._spsNal, this._ppsNal]));
+      } catch (_) {}
+    } else {
+      log.warn('[WebRTCBridge] missing cached SPS/PPS; waiting for next keyframe');
+    }
+
     log.info(`[WebRTCBridge] decoder started ${this._frameWidth}x${this._frameHeight}`);
+    setTimeout(() => {
+      if (this._decoderProc && this._decodedFrameCount === startDecoded) {
+        log.warn('[WebRTCBridge] decoder has not produced any frame in 3s');
+      }
+    }, 3000);
   }
 
   _drainRawFrames() {
@@ -228,6 +257,10 @@ class WebRTCBridge {
     while (this._decoderStdout.length >= this._frameSize) {
       const frame = this._decoderStdout.subarray(0, this._frameSize);
       this._decoderStdout = this._decoderStdout.subarray(this._frameSize);
+      this._decodedFrameCount += 1;
+      if (this._decodedFrameCount === 1) {
+        log.info('[WebRTCBridge] decoder produced first raw frame');
+      }
 
       for (const [, s] of this.sessions) {
         try {
@@ -249,6 +282,59 @@ class WebRTCBridge {
     } catch (_) {}
     this._decoderProc = null;
     this._decoderStdout = Buffer.alloc(0);
+  }
+
+  _cacheNalUnits(chunk) {
+    let i = 0;
+    while (i <= chunk.length - 5) {
+      if (chunk[i] === 0x00 && chunk[i + 1] === 0x00 &&
+          chunk[i + 2] === 0x00 && chunk[i + 3] === 0x01) {
+        const nalType = chunk[i + 4] & 0x1F;
+        const nextStart = this._findNextStartCode(chunk, i + 4);
+
+        if (nalType === 7) {
+          this._spsNal = chunk.slice(i, nextStart);
+          this._ppsNal = null;
+          this._idrNal = null;
+        } else if (nalType === 8) {
+          this._ppsNal = chunk.slice(i, nextStart);
+          this._idrNal = null;
+        } else if (nalType === 5 && this._spsNal && this._ppsNal) {
+          this._idrNal = chunk.slice(i, nextStart);
+        }
+        i = nextStart;
+      } else {
+        i++;
+      }
+    }
+  }
+
+  _findNextStartCode(buf, from) {
+    for (let i = from; i <= buf.length - 4; i++) {
+      if (buf[i] === 0x00 && buf[i + 1] === 0x00 &&
+          buf[i + 2] === 0x00 && buf[i + 3] === 0x01) {
+        return i;
+      }
+    }
+    return buf.length;
+  }
+
+  _waitForDecodedFrame(timeoutMs) {
+    if (this._decodedFrameCount > 0) return Promise.resolve(true);
+    const start = this._decodedFrameCount;
+    return new Promise((resolve) => {
+      const timer = setInterval(() => {
+        if (this._decodedFrameCount > start) {
+          clearInterval(timer);
+          clearTimeout(timeout);
+          resolve(true);
+        }
+      }, 100);
+      const timeout = setTimeout(() => {
+        clearInterval(timer);
+        resolve(this._decodedFrameCount > start);
+      }, timeoutMs);
+    });
   }
 
   async _detectFfmpeg() {

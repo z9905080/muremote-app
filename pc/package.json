@@ -5,8 +5,8 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
-    "postinstall": "node scripts/download-adb.js && node scripts/download-scrcpy.js",
-    "prebuild": "node scripts/download-adb.js && node scripts/download-scrcpy.js",
+    "postinstall": "node scripts/download-adb.js && node scripts/download-scrcpy.js && node scripts/ensure-wrtc.js",
+    "prebuild": "node scripts/download-adb.js && node scripts/download-scrcpy.js && node scripts/ensure-wrtc.js",
     "build": "npm run prebuild && electron-builder --win"
   },
   "author": "MuRemote Team",
