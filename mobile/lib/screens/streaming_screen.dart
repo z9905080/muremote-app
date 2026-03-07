@@ -1,6 +1,7 @@
 import 'dart:math' show sqrt, min;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 import '../services/streaming_service.dart';
 
@@ -131,13 +132,15 @@ class _StreamingScreenState extends State<StreamingScreen>
   }
 
   void _onPointerDown(PointerDownEvent e) {
-    debugPrint('[TOUCH] DOWN pointer=${e.pointer} local=${e.localPosition} videoRect=$_videoRect');
+    debugPrint(
+        '[TOUCH] DOWN pointer=${e.pointer} local=${e.localPosition} videoRect=$_videoRect');
     _closePanel();
     _activePointers[e.pointer] = e.localPosition;
     if (_activePointers.length == 1) {
       _isMultiTouchMode = false;
       final n = _normalize(e.localPosition);
-      debugPrint('[TOUCH] sending touchDown normalized=(${n.dx.toStringAsFixed(3)}, ${n.dy.toStringAsFixed(3)})');
+      debugPrint(
+          '[TOUCH] sending touchDown normalized=(${n.dx.toStringAsFixed(3)}, ${n.dy.toStringAsFixed(3)})');
       context.read<StreamingService>().touchDown(n.dx, n.dy);
     } else {
       // Second finger: cancel single-touch, enter multi-touch
@@ -196,8 +199,10 @@ class _StreamingScreenState extends State<StreamingScreen>
       media.size.width - _kEdgeStripWidth,
       media.size.height,
     );
-    final vw = (svc.frameWidth > 0 ? svc.frameWidth : svc.screenWidth).toDouble();
-    final vh = (svc.frameHeight > 0 ? svc.frameHeight : svc.screenHeight).toDouble();
+    final vw =
+        (svc.frameWidth > 0 ? svc.frameWidth : svc.screenWidth).toDouble();
+    final vh =
+        (svc.frameHeight > 0 ? svc.frameHeight : svc.screenHeight).toDouble();
     if (vw > 0 && vh > 0 && !_videoSize.isEmpty) {
       final scale = min(_videoSize.width / vw, _videoSize.height / vh);
       final sw = vw * scale;
@@ -219,7 +224,10 @@ class _StreamingScreenState extends State<StreamingScreen>
         children: [
           // ① Video area — Listener 直接掛在 Positioned 下，無 LayoutBuilder 包裹
           Positioned(
-            left: 0, top: 0, right: _kEdgeStripWidth, bottom: 0,
+            left: 0,
+            top: 0,
+            right: _kEdgeStripWidth,
+            bottom: 0,
             child: Listener(
               behavior: HitTestBehavior.opaque,
               onPointerDown: _onPointerDown,
@@ -229,13 +237,19 @@ class _StreamingScreenState extends State<StreamingScreen>
               child: Container(
                 color: Colors.black,
                 child: Center(
-                  child: svc.currentFrame != null
-                      ? Image.memory(
-                          svc.currentFrame!,
-                          fit: BoxFit.contain,
-                          gaplessPlayback: true,
+                  child: svc.isWebRtcStreaming && svc.remoteRenderer != null
+                      ? RTCVideoView(
+                          svc.remoteRenderer!,
+                          objectFit: RTCVideoViewObjectFit
+                              .RTCVideoViewObjectFitContain,
                         )
-                      : _buildWaitingWidget(svc),
+                      : svc.currentFrame != null
+                          ? Image.memory(
+                              svc.currentFrame!,
+                              fit: BoxFit.contain,
+                              gaplessPlayback: true,
+                            )
+                          : _buildWaitingWidget(svc),
                 ),
               ),
             ),
@@ -243,7 +257,10 @@ class _StreamingScreenState extends State<StreamingScreen>
 
           // ② Sliding panel
           Positioned(
-            right: _kEdgeStripWidth, top: 0, bottom: 0, width: _kPanelWidth,
+            right: _kEdgeStripWidth,
+            top: 0,
+            bottom: 0,
+            width: _kPanelWidth,
             child: IgnorePointer(
               ignoring: !_isPanelOpen,
               child: SlideTransition(
@@ -255,12 +272,16 @@ class _StreamingScreenState extends State<StreamingScreen>
 
           // ③ Edge strip
           Positioned(
-            right: 0, top: 0, bottom: 0, width: _kEdgeStripWidth,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: _kEdgeStripWidth,
             child: _buildEdgeStrip(svc),
           ),
 
           // ④ Stats HUD overlay (top-left of video, touch-transparent)
-          if (svc.isStreaming && svc.currentFrame != null)
+          if (svc.isStreaming &&
+              (svc.currentFrame != null || svc.isWebRtcStreaming))
             Positioned(
               left: 8,
               top: 8,
@@ -290,13 +311,15 @@ class _StreamingScreenState extends State<StreamingScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 6, height: 6,
+            width: 6,
+            height: 6,
             decoration: BoxDecoration(shape: BoxShape.circle, color: latColor),
           ),
           const SizedBox(width: 5),
           Text(
             '${lat}ms',
-            style: TextStyle(color: latColor, fontSize: 11, fontWeight: FontWeight.bold),
+            style: TextStyle(
+                color: latColor, fontSize: 11, fontWeight: FontWeight.bold),
           ),
           const SizedBox(width: 8),
           Text(
@@ -338,7 +361,8 @@ class _StreamingScreenState extends State<StreamingScreen>
         children: [
           const SizedBox(height: 8),
           Container(
-            width: 8, height: 8,
+            width: 8,
+            height: 8,
             margin: const EdgeInsets.symmetric(vertical: 6),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
@@ -400,12 +424,16 @@ class _StreamingScreenState extends State<StreamingScreen>
               const SizedBox(width: 6),
               Text(
                 svc.isStreaming ? 'LIVE' : '連線中',
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold),
               ),
               const Spacer(),
               Text(
                 '${lat}ms',
-                style: TextStyle(color: latColor, fontSize: 11, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: latColor, fontSize: 11, fontWeight: FontWeight.bold),
               ),
               const SizedBox(width: 4),
               Text(
@@ -415,7 +443,8 @@ class _StreamingScreenState extends State<StreamingScreen>
             ],
           ),
           const SizedBox(height: 4),
-          Text(svc.resolution, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          Text(svc.resolution,
+              style: const TextStyle(color: Colors.white38, fontSize: 11)),
           const SizedBox(height: 12),
           _buildFpsSelector(svc),
           const SizedBox(height: 10),
@@ -486,10 +515,13 @@ class _StreamingScreenState extends State<StreamingScreen>
               child: GestureDetector(
                 onTap: () => svc.setFps(fps),
                 child: Container(
-                  margin: isLast ? EdgeInsets.zero : const EdgeInsets.only(right: 5),
+                  margin: isLast
+                      ? EdgeInsets.zero
+                      : const EdgeInsets.only(right: 5),
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   decoration: BoxDecoration(
-                    color: selected ? Colors.blueAccent : const Color(0xFF2C2C2E),
+                    color:
+                        selected ? Colors.blueAccent : const Color(0xFF2C2C2E),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -498,7 +530,8 @@ class _StreamingScreenState extends State<StreamingScreen>
                     style: TextStyle(
                       color: selected ? Colors.white : Colors.white54,
                       fontSize: 12,
-                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight:
+                          selected ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
                 ),
@@ -526,10 +559,13 @@ class _StreamingScreenState extends State<StreamingScreen>
               child: GestureDetector(
                 onTap: () => svc.setQuality(q),
                 child: Container(
-                  margin: isLast ? EdgeInsets.zero : const EdgeInsets.only(right: 5),
+                  margin: isLast
+                      ? EdgeInsets.zero
+                      : const EdgeInsets.only(right: 5),
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   decoration: BoxDecoration(
-                    color: selected ? Colors.blueAccent : const Color(0xFF2C2C2E),
+                    color:
+                        selected ? Colors.blueAccent : const Color(0xFF2C2C2E),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -538,7 +574,8 @@ class _StreamingScreenState extends State<StreamingScreen>
                     style: TextStyle(
                       color: selected ? Colors.white : Colors.white54,
                       fontSize: 12,
-                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight:
+                          selected ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
                 ),
@@ -566,8 +603,10 @@ class _StreamingScreenState extends State<StreamingScreen>
           decoration: const InputDecoration(
             hintText: '輸入要發送的文字',
             hintStyle: TextStyle(color: Colors.white38),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.blueAccent)),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.white24)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.blueAccent)),
           ),
         ),
         actions: [
@@ -593,7 +632,8 @@ class _StreamingScreenState extends State<StreamingScreen>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(data != null ? '截圖成功' : '截圖失敗'),
       duration: const Duration(seconds: 2),
-      backgroundColor: data != null ? Colors.green.shade700 : Colors.red.shade700,
+      backgroundColor:
+          data != null ? Colors.green.shade700 : Colors.red.shade700,
     ));
   }
 }
@@ -625,7 +665,8 @@ class _EdgeButton extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, color: active ? Colors.blueAccent : Colors.white70, size: 20),
+              Icon(icon,
+                  color: active ? Colors.blueAccent : Colors.white70, size: 20),
               const SizedBox(height: 3),
               Text(
                 label,

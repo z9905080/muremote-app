@@ -22,6 +22,7 @@ class StreamingService extends ChangeNotifier {
   bool _isConnected = false;
   bool _isConnecting = false;
   bool _isStreaming = false;
+  bool _isWebRtcStreaming = false;
   int _latency = 0;
   int _fps = 0;
   String _resolution = '720p';
@@ -29,21 +30,21 @@ class StreamingService extends ChangeNotifier {
   String _pcId = '';
   int _screenWidth = 1080;
   int _screenHeight = 1920;
-  
+
   // 影片幀緩衝
   ui.Image? _currentFrame;
   final List<Uint8List> _frameBuffer = [];
   bool _isDecoding = false;
-  
+
   // 當前幀圖片 (用於顯示)
   Uint8List? _currentJpegData;
 
   // Server URL - 應該從設定中獲取
   String _serverUrl = 'ws://192.168.1.100:12000';
-  
+
   // 幀率設定
   int _setFps = 30;
-  
+
   // 延遲量測
   Timer? _pingTimer;
 
@@ -65,6 +66,8 @@ class StreamingService extends ChangeNotifier {
   int get screenHeight => _screenHeight;
   String get quality => _quality;
   String get serverUrl => _serverUrl;
+  bool get isWebRtcStreaming => _isWebRtcStreaming;
+  RTCVideoRenderer? get remoteRenderer => _remoteRenderer;
 
   StreamingService() {
     _initRenderer();
@@ -81,7 +84,8 @@ class StreamingService extends ChangeNotifier {
    * @param serverUrl - WebSocket 伺服器 URL (可選)
    * @param metadata - 連線元數據，包含模擬器類型等 (可選)
    */
-  Future<void> connect(String pcId, {String? serverUrl, Map<String, dynamic>? metadata}) async {
+  Future<void> connect(String pcId,
+      {String? serverUrl, Map<String, dynamic>? metadata}) async {
     if (_isConnected || _isConnecting) return;
 
     _isConnecting = true;
@@ -92,11 +96,12 @@ class StreamingService extends ChangeNotifier {
     try {
       // 連接 WebSocket
       _ws = await WebSocket.connect(_serverUrl);
-      
+
       _ws!.listen(
         (message) => _handleMessage(message),
         onError: (error) {
           debugPrint('WebSocket error: $error');
+          _disposePeerConnection();
           _isConnected = false;
           _isConnecting = false;
           notifyListeners();
@@ -104,8 +109,10 @@ class StreamingService extends ChangeNotifier {
         },
         onDone: () {
           debugPrint('WebSocket closed');
+          _disposePeerConnection();
           _isConnected = false;
           _isStreaming = false;
+          _isWebRtcStreaming = false;
           notifyListeners();
           _scheduleReconnect();
         },
@@ -148,19 +155,23 @@ class StreamingService extends ChangeNotifier {
             debugPrint('[StreamingService] 歡迎訊息：pcId=${data['pcId']}');
             break;
           case 'connected':
-            debugPrint('[StreamingService] 連線確認：emulatorType=${data['emulatorType']} screenSize=${data['screenSize']}');
+            debugPrint(
+                '[StreamingService] 連線確認：emulatorType=${data['emulatorType']} screenSize=${data['screenSize']}');
             final size = data['screenSize'];
             if (size != null) {
-              _screenWidth  = (size['width']  as num?)?.toInt() ?? _screenWidth;
-              _screenHeight = (size['height'] as num?)?.toInt() ?? _screenHeight;
-              debugPrint('[StreamingService] 螢幕大小已更新：${_screenWidth}x$_screenHeight');
+              _screenWidth = (size['width'] as num?)?.toInt() ?? _screenWidth;
+              _screenHeight =
+                  (size['height'] as num?)?.toInt() ?? _screenHeight;
+              debugPrint(
+                  '[StreamingService] 螢幕大小已更新：${_screenWidth}x$_screenHeight');
               notifyListeners();
             }
             break;
           case 'pong':
             final ts = data['timestamp'] as int?;
             if (ts != null) {
-              _latency = ((DateTime.now().millisecondsSinceEpoch - ts) / 2).round();
+              _latency =
+                  ((DateTime.now().millisecondsSinceEpoch - ts) / 2).round();
               notifyListeners();
             }
             break;
@@ -169,10 +180,22 @@ class StreamingService extends ChangeNotifier {
             _resolution = data['resolution'] ?? _resolution;
             notifyListeners();
             break;
+          case 'stream-mode':
+            _isWebRtcStreaming = data['mode'] == 'webrtc';
+            debugPrint('[StreamingService] stream mode=${data['mode']}');
+            notifyListeners();
+            break;
+          case 'webrtc-offer':
+            _handleWebRtcOffer(data['sdp']);
+            break;
+          case 'webrtc-ice-candidate':
+            _handleWebRtcIceCandidate(data['candidate']);
+            break;
           case 'screen-size':
-            _screenWidth  = data['width']  ?? 1080;
+            _screenWidth = data['width'] ?? 1080;
             _screenHeight = data['height'] ?? 1920;
-            debugPrint('[StreamingService] screen-size 更新：${_screenWidth}x$_screenHeight');
+            debugPrint(
+                '[StreamingService] screen-size 更新：${_screenWidth}x$_screenHeight');
             notifyListeners();
             break;
           case 'error':
@@ -203,7 +226,8 @@ class StreamingService extends ChangeNotifier {
     }
 
     final frameType = data[0];
-    debugPrint('[StreamingService] 幀類型=0x${frameType.toRadixString(16).padLeft(2, '0')} 長度=${data.length}');
+    debugPrint(
+        '[StreamingService] 幀類型=0x${frameType.toRadixString(16).padLeft(2, '0')} 長度=${data.length}');
 
     if (frameType == 0x01) {
       final jpegData = data.sublist(1);
@@ -213,10 +237,13 @@ class StreamingService extends ChangeNotifier {
       _displayJpegFrame(jpegData);
       _handleScreenshot(jpegData);
     } else if (data.length > 4) {
-      debugPrint('[StreamingService] ⚠️ 未知幀類型 0x${frameType.toRadixString(16)}，嘗試長度前綴解析');
+      debugPrint(
+          '[StreamingService] ⚠️ 未知幀類型 0x${frameType.toRadixString(16)}，嘗試長度前綴解析');
       try {
-        final length = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
-        debugPrint('[StreamingService] 長度前綴解析：宣告長度=$length 實際長度=${data.length}');
+        final length =
+            (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+        debugPrint(
+            '[StreamingService] 長度前綴解析：宣告長度=$length 實際長度=${data.length}');
         if (data.length >= length + 4) {
           _displayJpegFrame(data.sublist(4, 4 + length));
         } else {
@@ -228,7 +255,8 @@ class StreamingService extends ChangeNotifier {
         _displayJpegFrame(data);
       }
     } else {
-      debugPrint('[StreamingService] ❌ 無法識別的幀格式，首4bytes=${data.take(4).map((b) => '0x${b.toRadixString(16).padLeft(2,'0')}').join(' ')}');
+      debugPrint(
+          '[StreamingService] ❌ 無法識別的幀格式，首4bytes=${data.take(4).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
     }
   }
 
@@ -242,10 +270,11 @@ class StreamingService extends ChangeNotifier {
     }
 
     final isJpeg = frameData[0] == 0xFF && frameData[1] == 0xD8;
-    final isPng  = frameData[0] == 0x89 && frameData[1] == 0x50;
+    final isPng = frameData[0] == 0x89 && frameData[1] == 0x50;
 
     if (!isJpeg && !isPng) {
-      debugPrint('[StreamingService] ⚠️ 幀不是 JPEG/PNG，首2bytes=0x${frameData[0].toRadixString(16)} 0x${frameData[1].toRadixString(16)}，嘗試搜尋 JPEG 標記');
+      debugPrint(
+          '[StreamingService] ⚠️ 幀不是 JPEG/PNG，首2bytes=0x${frameData[0].toRadixString(16)} 0x${frameData[1].toRadixString(16)}，嘗試搜尋 JPEG 標記');
       bool found = false;
       for (int i = 0; i < frameData.length - 1; i++) {
         if (frameData[i] == 0xFF && frameData[i + 1] == 0xD8) {
@@ -261,7 +290,8 @@ class StreamingService extends ChangeNotifier {
       }
     }
 
-    debugPrint('[StreamingService] ✅ 顯示幀 ${isJpeg ? 'JPEG' : isPng ? 'PNG' : 'JPEG(搜尋)'} ${frameData.length} bytes');
+    debugPrint(
+        '[StreamingService] ✅ 顯示幀 ${isJpeg ? 'JPEG' : isPng ? 'PNG' : 'JPEG(搜尋)'} ${frameData.length} bytes');
     _currentJpegData = frameData;
     // 從 JPEG header 讀取實際解析度（用於自動旋轉）
     final dims = _readJpegDimensions(frameData);
@@ -294,15 +324,15 @@ class StreamingService extends ChangeNotifier {
    * 開始串流
    */
   Future<void> startStreaming() async {
-    debugPrint('[StreamingService] startStreaming() called, isConnected=$_isConnected, isStreaming=$_isStreaming');
+    debugPrint(
+        '[StreamingService] startStreaming() called, isConnected=$_isConnected, isStreaming=$_isStreaming');
     if (!_isConnected || _isStreaming) return;
 
     debugPrint('[StreamingService] 送出 start-stream');
-    _ws?.add(jsonEncode({
-      'type': 'start-stream'
-    }));
+    _ws?.add(jsonEncode({'type': 'start-stream'}));
 
     _isStreaming = true;
+    _isWebRtcStreaming = false;
     notifyListeners();
 
     // 請求螢幕大小
@@ -330,8 +360,10 @@ class StreamingService extends ChangeNotifier {
     _pingTimer = null;
 
     _ws?.add(jsonEncode({'type': 'stop-stream'}));
+    await _disposePeerConnection();
 
     _isStreaming = false;
+    _isWebRtcStreaming = false;
     _currentJpegData = null;
     _latency = 0;
     notifyListeners();
@@ -344,11 +376,13 @@ class StreamingService extends ChangeNotifier {
    */
   void sendTouch(double x, double y, String action) {
     if (!_isConnected) {
-      debugPrint('[StreamingService] sendTouch SKIPPED (not connected) action=$action x=$x y=$y');
+      debugPrint(
+          '[StreamingService] sendTouch SKIPPED (not connected) action=$action x=$x y=$y');
       return;
     }
 
-    debugPrint('[StreamingService] sendTouch action=$action x=${x.toStringAsFixed(3)} y=${y.toStringAsFixed(3)}');
+    debugPrint(
+        '[StreamingService] sendTouch action=$action x=${x.toStringAsFixed(3)} y=${y.toStringAsFixed(3)}');
     // 座標已經是 0-1 範圍
     _ws?.add(jsonEncode({
       'type': 'touch',
@@ -390,7 +424,8 @@ class StreamingService extends ChangeNotifier {
   /**
    * 滑動
    */
-  void swipe(double startX, double startY, double endX, double endY, {int duration = 300}) {
+  void swipe(double startX, double startY, double endX, double endY,
+      {int duration = 300}) {
     if (!_isConnected) return;
 
     _ws?.add(jsonEncode({
@@ -410,10 +445,7 @@ class StreamingService extends ChangeNotifier {
   void sendKey(String key) {
     if (!_isConnected) return;
 
-    _ws?.add(jsonEncode({
-      'type': 'key',
-      'key': key
-    }));
+    _ws?.add(jsonEncode({'type': 'key', 'key': key}));
   }
 
   /**
@@ -422,23 +454,20 @@ class StreamingService extends ChangeNotifier {
   void sendText(String text) {
     if (!_isConnected) return;
 
-    _ws?.add(jsonEncode({
-      'type': 'text',
-      'text': text
-    }));
+    _ws?.add(jsonEncode({'type': 'text', 'text': text}));
   }
 
   /**
    * 處理截圖回調
    */
   Uint8List? _lastScreenshot;
-  
+
   void _handleScreenshot(Uint8List jpegData) {
     _lastScreenshot = jpegData;
     _screenshotCompleter?.complete(jpegData);
     _screenshotCompleter = null;
   }
-  
+
   Completer<Uint8List?>? _screenshotCompleter;
 
   /**
@@ -448,19 +477,15 @@ class StreamingService extends ChangeNotifier {
     if (!_isConnected) return null;
 
     _screenshotCompleter = Completer<Uint8List?>();
-    
-    _ws?.add(jsonEncode({
-      'type': 'screenshot'
-    }));
+
+    _ws?.add(jsonEncode({'type': 'screenshot'}));
 
     // 5秒超時
-    return _screenshotCompleter!.future.timeout(
-      const Duration(seconds: 5),
-      onTimeout: () {
-        _screenshotCompleter = null;
-        return null;
-      }
-    );
+    return _screenshotCompleter!.future.timeout(const Duration(seconds: 5),
+        onTimeout: () {
+      _screenshotCompleter = null;
+      return null;
+    });
   }
 
   /**
@@ -469,13 +494,10 @@ class StreamingService extends ChangeNotifier {
    */
   Future<void> setQuality(String quality) async {
     if (!_isConnected) return;
-    
+
     _quality = quality;
-    _ws?.add(jsonEncode({
-      'type': 'set-quality',
-      'quality': quality
-    }));
-    
+    _ws?.add(jsonEncode({'type': 'set-quality', 'quality': quality}));
+
     notifyListeners();
     log('Quality changed to: $quality');
   }
@@ -486,13 +508,10 @@ class StreamingService extends ChangeNotifier {
    */
   Future<void> setFps(int fps) async {
     if (!_isConnected) return;
-    
+
     _setFps = fps;
-    _ws?.add(jsonEncode({
-      'type': 'set-fps',
-      'fps': fps
-    }));
-    
+    _ws?.add(jsonEncode({'type': 'set-fps', 'fps': fps}));
+
     notifyListeners();
   }
 
@@ -502,12 +521,12 @@ class StreamingService extends ChangeNotifier {
    */
   void setServerUrl(String url) {
     if (url.isEmpty) return;
-    
+
     // 確保 URL 格式正確
     if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
       url = 'ws://$url';
     }
-    
+
     _serverUrl = url;
     notifyListeners();
     log('Server URL set to: $_serverUrl');
@@ -521,9 +540,10 @@ class StreamingService extends ChangeNotifier {
     _pingTimer?.cancel();
     _pingTimer = null;
     await stopStreaming();
-    
+
     _ws?.close();
     _ws = null;
+    await _disposePeerConnection();
     _isConnected = false;
     _isConnecting = false;
     _pcId = '';
@@ -540,7 +560,7 @@ class StreamingService extends ChangeNotifier {
       log('Max reconnection attempts reached');
       return;
     }
-    
+
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(
       Duration(seconds: _reconnectDelaySeconds * (_reconnectAttempts + 1)),
@@ -596,5 +616,119 @@ class StreamingService extends ChangeNotifier {
     disconnect();
     _remoteRenderer?.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleWebRtcOffer(dynamic sdp) async {
+    try {
+      final pc = await _ensurePeerConnection();
+      final remoteSdp = _parseSessionDescription(sdp);
+      if (remoteSdp == null) {
+        debugPrint('[StreamingService] ❌ invalid webrtc offer payload');
+        return;
+      }
+
+      await pc.setRemoteDescription(remoteSdp);
+      final answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      _ws?.add(jsonEncode({
+        'type': 'webrtc-answer',
+        'sdp': answer.toMap(),
+      }));
+      debugPrint('[StreamingService] ✅ webrtc answer sent');
+    } catch (e) {
+      debugPrint('[StreamingService] ❌ handle webrtc offer failed: $e');
+    }
+  }
+
+  Future<void> _handleWebRtcIceCandidate(dynamic candidate) async {
+    try {
+      if (_peerConnection == null || candidate == null) return;
+      final c = _parseIceCandidate(candidate);
+      if (c == null) return;
+      await _peerConnection!.addCandidate(c);
+    } catch (e) {
+      debugPrint('[StreamingService] ⚠️ add remote ICE candidate failed: $e');
+    }
+  }
+
+  Future<RTCPeerConnection> _ensurePeerConnection() async {
+    if (_peerConnection != null) return _peerConnection!;
+
+    _peerConnection = await createPeerConnection({
+      'sdpSemantics': 'unified-plan',
+      'iceServers': [
+        {'urls': 'stun:stun.l.google.com:19302'},
+        {'urls': 'stun:stun1.l.google.com:19302'},
+      ],
+    });
+
+    _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
+      _ws?.add(jsonEncode({
+        'type': 'webrtc-ice-candidate',
+        'candidate': candidate.toMap(),
+      }));
+    };
+
+    _peerConnection!.onTrack = (RTCTrackEvent event) {
+      if (event.streams.isNotEmpty) {
+        _remoteRenderer?.srcObject = event.streams.first;
+      } else if (event.track != null) {
+        createLocalMediaStream('remote').then((stream) {
+          stream.addTrack(event.track);
+          _remoteRenderer?.srcObject = stream;
+        });
+      }
+      _isWebRtcStreaming = true;
+      notifyListeners();
+    };
+
+    _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        _isWebRtcStreaming = true;
+      } else if (state ==
+              RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateClosed ||
+          state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        _isWebRtcStreaming = false;
+      }
+      notifyListeners();
+    };
+
+    return _peerConnection!;
+  }
+
+  RTCSessionDescription? _parseSessionDescription(dynamic raw) {
+    if (raw is RTCSessionDescription) return raw;
+    if (raw is Map) {
+      final sdp = raw['sdp']?.toString();
+      final t = raw['type']?.toString();
+      if (sdp != null && t != null) {
+        return RTCSessionDescription(sdp, t);
+      }
+    }
+    return null;
+  }
+
+  RTCIceCandidate? _parseIceCandidate(dynamic raw) {
+    if (raw is RTCIceCandidate) return raw;
+    if (raw is Map) {
+      final candidate = raw['candidate']?.toString();
+      if (candidate == null || candidate.isEmpty) return null;
+      final sdpMid = raw['sdpMid']?.toString();
+      final sdpMLineIndex = (raw['sdpMLineIndex'] as num?)?.toInt();
+      return RTCIceCandidate(candidate, sdpMid, sdpMLineIndex);
+    }
+    return null;
+  }
+
+  Future<void> _disposePeerConnection() async {
+    try {
+      await _peerConnection?.close();
+    } catch (_) {}
+    _peerConnection = null;
+    _remoteRenderer?.srcObject = null;
+    _isWebRtcStreaming = false;
   }
 }

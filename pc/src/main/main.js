@@ -10,6 +10,7 @@ const Streamer = require('./streamer');
 const TouchHandler = require('./touch_handler');
 const MultiTouchHandler = require('./multi_touch_handler');
 const ScrcpyManager = require('./scrcpy_manager');
+const WebRTCBridge = require('./webrtc_bridge');
 const MdnsAdvertiser = require('./mdns_advertiser');
 const { EMULATOR_CONFIGS } = require('./device_manager');
 const DeviceManager = require('./device_manager');
@@ -30,6 +31,7 @@ let mdnsAdvertiser = null;
 let deviceManager = null;
 let multiInstanceManager = null;
 let reconnectionManager = null;
+let webrtcBridge = null;
 let connectedClients = new Map();
 let pcId = uuidv4().substring(0, 8).toUpperCase();
 let hasShownTrayHint = false;
@@ -189,6 +191,7 @@ async function _initScrcpy(deviceId) {
   if (scrcpyManager) {
     scrcpyManager.stop();
     scrcpyManager = null;
+    webrtcBridge?.setScrcpyManager(null);
   }
 
   scrcpyManager = new ScrcpyManager(deviceManager.adbPath, deviceId);
@@ -206,10 +209,12 @@ async function _initScrcpy(deviceId) {
   if (ok) {
     streamer.setScrcpyManager(scrcpyManager);
     touchHandler.setScrcpyManager(scrcpyManager);
+    webrtcBridge?.setScrcpyManager(scrcpyManager);
     log.info('[main] scrcpy 高效模式已啟用 (H.264 串流 + 低延遲觸控)');
   } else {
     log.warn('[main] scrcpy 啟動失敗，使用 screencap 回退模式');
     log.warn('[main] 請執行 node scripts/download-scrcpy.js 下載 scrcpy-server.jar');
+    webrtcBridge?.setScrcpyManager(null);
     scrcpyManager = null;
   }
 }
@@ -342,6 +347,9 @@ async function startWebSocketServer() {
     });
 
     ws.on('close', () => {
+      if (webrtcBridge) {
+        webrtcBridge.stopSession(clientId);
+      }
       connectedClients.delete(clientId);
       log.info('Client disconnected:', clientId);
       updateTrayMenu();
@@ -412,13 +420,16 @@ async function handleClientMessage(clientId, ws, data) {
       }
       break;
 
-    case 'offer':
-      // WebRTC offer - not using in POC, using WebSocket streaming instead
-      log.info('Received WebRTC offer (using WebSocket streaming instead)');
+    case 'webrtc-answer':
+      if (webrtcBridge) {
+        await webrtcBridge.handleAnswer(clientId, data.sdp);
+      }
       break;
 
-    case 'ice-candidate':
-      log.info('Received ICE candidate');
+    case 'webrtc-ice-candidate':
+      if (webrtcBridge) {
+        await webrtcBridge.handleIceCandidate(clientId, data.candidate);
+      }
       break;
 
     case 'ping':
@@ -463,14 +474,26 @@ async function handleClientMessage(clientId, ws, data) {
 
     case 'start-stream':
       // 開始串流
+      if (webrtcBridge && webrtcBridge.isSupported()) {
+        const ok = await webrtcBridge.startSession(clientId, ws);
+        if (ok) {
+          ws.send(JSON.stringify({ type: 'stream-mode', mode: 'webrtc' }));
+          break;
+        }
+      }
+
       if (streamer) {
         streamer.addClient(ws);
         await streamer.startStream(ws);
+        ws.send(JSON.stringify({ type: 'stream-mode', mode: 'legacy' }));
       }
       break;
 
     case 'stop-stream':
       // 停止串流
+      if (webrtcBridge) {
+        webrtcBridge.stopSession(clientId);
+      }
       if (streamer) {
         streamer.stopStream();
       }
@@ -773,6 +796,10 @@ app.whenReady().then(async () => {
   createTray();
   
   await connectADB();
+  webrtcBridge = new WebRTCBridge({ stunServers: config.stun || [] });
+  if (scrcpyManager) {
+    webrtcBridge.setScrcpyManager(scrcpyManager);
+  }
   initReconnectionManager();
   startDeviceMonitoring();
   const wsPort = await startWebSocketServer();
@@ -809,6 +836,7 @@ app.on('before-quit', () => {
   connectedClients.clear();
 
   if (scrcpyManager) { scrcpyManager.stop(); scrcpyManager = null; }
+  if (webrtcBridge) { webrtcBridge.stopAll(); webrtcBridge = null; }
   if (streamer) { streamer.stopStream(); streamer = null; }
   if (wsServer) { wsServer.close(); wsServer = null; }
   if (mdnsAdvertiser) { mdnsAdvertiser.stop(); mdnsAdvertiser = null; }

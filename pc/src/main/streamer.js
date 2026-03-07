@@ -258,6 +258,8 @@ class Streamer {
       '-loglevel',        'warning',
       '-probesize',       '32',      // 不探測輸入，立即開始解碼
       '-analyzeduration', '0',       // 無分析延遲
+      '-fflags',          'nobuffer',// 關閉輸入緩衝，降低管道累積延遲
+      '-flags',           'low_delay',// 低延遲解碼模式，盡快輸出可解碼幀
       '-f',               'h264',    // 輸入格式：raw H.264 Annex B
       '-i',               'pipe:0',  // 從 stdin 讀取
       '-f',               'image2pipe',
