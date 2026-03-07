@@ -52,8 +52,9 @@ class TouchHandler {
   async handleTouch(data) {
     const { action, x, y, pointerId = 0 } = data;
 
-    const posX = Math.round(x * this.screenWidth);
-    const posY = Math.round(y * this.screenHeight);
+    const { w, h } = this._effectiveDims();
+    const posX = Math.round(x * w);
+    const posY = Math.round(y * h);
 
     try {
       switch (action) {
@@ -62,8 +63,8 @@ class TouchHandler {
         case 'up':    await this.touchUp(posX, posY, pointerId);    break;
         case 'tap':   await this.tap(posX, posY);                   break;
         case 'swipe': {
-          const ex = Math.round((data.endX ?? x) * this.screenWidth);
-          const ey = Math.round((data.endY ?? y) * this.screenHeight);
+          const ex = Math.round((data.endX ?? x) * w);
+          const ey = Math.round((data.endY ?? y) * h);
           await this.swipe(posX, posY, ex, ey, data.duration ?? 300);
           break;
         }
@@ -84,7 +85,8 @@ class TouchHandler {
     this.isDown = true;
 
     if (this._useScrcpy()) {
-      this.scrcpyManager.sendTouchEvent(0, x, y, this.screenWidth, this.screenHeight, pointerId);
+      const { w, h } = this._effectiveDims();
+      this.scrcpyManager.sendTouchEvent(0, x, y, w, h, pointerId);
     } else {
       await this._adbShell(`input tap ${x} ${y}`);
     }
@@ -101,7 +103,8 @@ class TouchHandler {
     if (distance < 2) return;  // 微小移動忽略
 
     if (this._useScrcpy()) {
-      this.scrcpyManager.sendTouchEvent(2, x, y, this.screenWidth, this.screenHeight, pointerId);
+      const { w, h } = this._effectiveDims();
+      this.scrcpyManager.sendTouchEvent(2, x, y, w, h, pointerId);
     } else {
       const duration = Math.max(10, Math.floor(distance / 2));
       await this._adbShell(`input swipe ${this.lastX} ${this.lastY} ${x} ${y} ${duration}`);
@@ -118,7 +121,8 @@ class TouchHandler {
     this.isDown = false;
 
     if (this._useScrcpy()) {
-      this.scrcpyManager.sendTouchEvent(1, x, y, this.screenWidth, this.screenHeight, pointerId);
+      const { w, h } = this._effectiveDims();
+      this.scrcpyManager.sendTouchEvent(1, x, y, w, h, pointerId);
     }
     // adb shell 回退：swipe 完成後不需要額外的 UP 事件
   }
@@ -128,10 +132,11 @@ class TouchHandler {
    */
   async tap(x, y) {
     if (this._useScrcpy()) {
-      this.scrcpyManager.sendTouchEvent(0, x, y, this.screenWidth, this.screenHeight, 0);
+      const { w, h } = this._effectiveDims();
+      this.scrcpyManager.sendTouchEvent(0, x, y, w, h, 0);
       // 給設備一點反應時間後再發 UP（模擬真實點擊）
       await this._sleep(50);
-      this.scrcpyManager.sendTouchEvent(1, x, y, this.screenWidth, this.screenHeight, 0);
+      this.scrcpyManager.sendTouchEvent(1, x, y, w, h, 0);
     } else {
       await this._adbShell(`input tap ${x} ${y}`);
     }
@@ -227,6 +232,18 @@ class TouchHandler {
   }
 
   /**
+   * 返回觸控事件應使用的螢幕尺寸。
+   * scrcpy 以 video 流尺寸（max_size 縮放後）作為座標空間，
+   * 若傳入與 server 不符的尺寸會觸發 "different device size" 警告並丟棄事件。
+   */
+  _effectiveDims() {
+    if (this._useScrcpy() && this.scrcpyManager.videoWidth > 0) {
+      return { w: this.scrcpyManager.videoWidth, h: this.scrcpyManager.videoHeight };
+    }
+    return { w: this.screenWidth, h: this.screenHeight };
+  }
+
+  /**
    * 用 scrcpy 控制通道模擬平滑滑動：
    * DOWN → N × MOVE → UP
    */
@@ -234,18 +251,19 @@ class TouchHandler {
     const STEPS = Math.max(3, Math.round(durationMs / 16));  // ~60fps 步數
     const stepDelay = Math.round(durationMs / STEPS);
     const m = this.scrcpyManager;
+    const { w, h } = this._effectiveDims();
 
-    m.sendTouchEvent(0, x1, y1, this.screenWidth, this.screenHeight, 0);  // DOWN
+    m.sendTouchEvent(0, x1, y1, w, h, 0);  // DOWN
 
     for (let i = 1; i < STEPS; i++) {
       const t  = i / STEPS;
       const mx = Math.round(x1 + (x2 - x1) * t);
       const my = Math.round(y1 + (y2 - y1) * t);
-      m.sendTouchEvent(2, mx, my, this.screenWidth, this.screenHeight, 0);  // MOVE
+      m.sendTouchEvent(2, mx, my, w, h, 0);  // MOVE
       await this._sleep(stepDelay);
     }
 
-    m.sendTouchEvent(1, x2, y2, this.screenWidth, this.screenHeight, 0);  // UP
+    m.sendTouchEvent(1, x2, y2, w, h, 0);  // UP
   }
 
   _adbShell(command) {
