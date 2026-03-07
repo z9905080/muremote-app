@@ -253,7 +253,31 @@ class StreamingService extends ChangeNotifier {
 
     debugPrint('[StreamingService] ✅ 顯示幀 ${isJpeg ? 'JPEG' : isPng ? 'PNG' : 'JPEG(搜尋)'} ${frameData.length} bytes');
     _currentJpegData = frameData;
+    // 從 JPEG header 讀取實際解析度（用於自動旋轉）
+    final dims = _readJpegDimensions(frameData);
+    if (dims != null) {
+      _frameWidth = dims[0];
+      _frameHeight = dims[1];
+    }
     notifyListeners();
+  }
+
+  int _frameWidth = 0;
+  int _frameHeight = 0;
+  int get frameWidth => _frameWidth;
+  int get frameHeight => _frameHeight;
+
+  /// 從 JPEG SOF marker 讀取實際寬高
+  List<int>? _readJpegDimensions(Uint8List data) {
+    for (int i = 0; i < data.length - 8; i++) {
+      if (data[i] == 0xFF &&
+          (data[i + 1] == 0xC0 || data[i + 1] == 0xC1 || data[i + 1] == 0xC2)) {
+        final h = (data[i + 5] << 8) | data[i + 6];
+        final w = (data[i + 7] << 8) | data[i + 8];
+        if (w > 0 && h > 0) return [w, h];
+      }
+    }
+    return null;
   }
 
   /**
@@ -298,8 +322,12 @@ class StreamingService extends ChangeNotifier {
    * @param action 動作: tap, down, move, up
    */
   void sendTouch(double x, double y, String action) {
-    if (!_isConnected) return;
+    if (!_isConnected) {
+      debugPrint('[StreamingService] sendTouch SKIPPED (not connected) action=$action x=$x y=$y');
+      return;
+    }
 
+    debugPrint('[StreamingService] sendTouch action=$action x=${x.toStringAsFixed(3)} y=${y.toStringAsFixed(3)}');
     // 座標已經是 0-1 範圍
     _ws?.add(jsonEncode({
       'type': 'touch',

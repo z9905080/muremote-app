@@ -7,7 +7,11 @@
       "Bash(rm:*)",
       "Bash(pnpm audit:*)",
       "Bash(pnpm build:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(pod install:*)",
+      "Bash(open:*)",
+      "Bash(flutter analyze:*)",
+      "Bash(flutter run:*)"
     ]
   }
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/webrtc_service.dart';
 import '../services/streaming_service.dart';
 import '../services/discovery_service.dart';
 
@@ -32,17 +31,6 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     super.dispose();
   }
 
-  Future<void> _connectToDevice(DeviceInfo device) async {
-    debugPrint('[ConnectionScreen] _connectToDevice: ${device.ip}:${device.port}');
-    final streamingService = context.read<StreamingService>();
-    await streamingService.connect(
-      device.pcId,
-      serverUrl: 'ws://${device.ip}:${device.port}',
-    );
-    if (streamingService.isConnected && mounted) {
-      Navigator.pushNamed(context, '/stream');
-    }
-  }
 
   /// 顯示模擬器選擇對話框
   void _showEmulatorSelector(BuildContext context, DeviceInfo device) {
@@ -65,15 +53,21 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   Future<void> _connectWithEmulator(DeviceInfo device, EmulatorType emulatorType) async {
     debugPrint('[ConnectionScreen] _connectWithEmulator: ${device.ip}:${device.port} type=${emulatorType.key}');
     final streamingService = context.read<StreamingService>();
-    // 傳送模擬器類型到 PC 端
     await streamingService.connect(
       device.pcId,
       serverUrl: 'ws://${device.ip}:${device.port}',
       metadata: {'emulatorType': emulatorType.key},
     );
-    debugPrint('[ConnectionScreen] connect() returned, isConnected=${streamingService.isConnected}');
-    if (streamingService.isConnected && mounted) {
+    if (!mounted) return;
+    if (streamingService.isConnected) {
       Navigator.pushNamed(context, '/stream');
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('無法連線至 ${device.ip}:${device.port}，請確認 PC Client 已啟動'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
     }
   }
 
@@ -142,7 +136,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           ),
         ],
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -223,92 +217,64 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
               // Device List
               if (discoveryService.devices.isEmpty)
-                Expanded(
+                SizedBox(
+                  height: 200,
                   child: Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.search_off,
-                          size: 64,
-                          color: Colors.grey.shade400,
-                        ),
+                        Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
                         const SizedBox(height: 16),
-                        Text(
-                          '搜尋中...',
-                          style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 16,
-                          ),
-                        ),
+                        Text('搜尋中...', style: TextStyle(color: Colors.grey.shade600, fontSize: 16)),
                         const SizedBox(height: 8),
-                        Text(
-                          '確保 PC Client 正在執行',
-                          style: TextStyle(
-                            color: Colors.grey.shade500,
-                            fontSize: 14,
-                          ),
-                        ),
+                        Text('確保 PC Client 正在執行', style: TextStyle(color: Colors.grey.shade500, fontSize: 14)),
                       ],
                     ),
                   ),
                 )
               else
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: discoveryService.devices.length,
-                    itemBuilder: (context, index) {
-                      final device = discoveryService.devices[index];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: _getEmulatorColor(device.emulatorType),
-                            child: Icon(
-                              _getEmulatorIcon(device.emulatorType),
-                              color: Colors.white,
-                            ),
-                          ),
-                          title: Text(device.name),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('${device.ip}:${device.port}'),
-                              if (device.emulatorType != EmulatorType.unknown)
-                                Container(
-                                  margin: const EdgeInsets.only(top: 4),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: _getEmulatorColor(device.emulatorType).withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    device.emulatorType.displayName,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: _getEmulatorColor(device.emulatorType),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          trailing: streamingService.isConnecting
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.chevron_right),
-                          onTap: streamingService.isConnecting
-                            ? null
-                            : () => _showEmulatorSelector(context, device),
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: discoveryService.devices.length,
+                  itemBuilder: (context, index) {
+                    final device = discoveryService.devices[index];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: _getEmulatorColor(device.emulatorType),
+                          child: Icon(_getEmulatorIcon(device.emulatorType), color: Colors.white),
                         ),
-                      );
-                    },
-                  ),
+                        title: Text(device.name),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${device.ip}:${device.port}'),
+                            if (device.emulatorType != EmulatorType.unknown)
+                              Container(
+                                margin: const EdgeInsets.only(top: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: _getEmulatorColor(device.emulatorType).withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  device.emulatorType.displayName,
+                                  style: TextStyle(fontSize: 12, color: _getEmulatorColor(device.emulatorType)),
+                                ),
+                              ),
+                          ],
+                        ),
+                        trailing: streamingService.isConnecting
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.chevron_right),
+                        onTap: streamingService.isConnecting
+                          ? null
+                          : () => _showEmulatorSelector(context, device),
+                      ),
+                    );
+                  },
                 ),
 
               const SizedBox(height: 16),
@@ -348,7 +314,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: TextInputType.url,
               ),
               const SizedBox(height: 16),
 
@@ -381,17 +347,21 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                     ? null
                     : () async {
                         final ip = _ipController.text.trim();
-                        if (ip.isNotEmpty) {
-                          await streamingService.connect(
-                            _pcIdController.text.trim().isEmpty 
-                              ? ip 
-                              : _pcIdController.text.trim(),
-                            serverUrl: 'ws://$ip:12000',
+                        if (ip.isEmpty) return;
+                        await streamingService.connect(
+                          _pcIdController.text.trim().isEmpty ? ip : _pcIdController.text.trim(),
+                          serverUrl: 'ws://$ip:12000',
+                        );
+                        if (!context.mounted) return;
+                        if (streamingService.isConnected) {
+                          Navigator.pushNamed(context, '/stream');
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('無法連線至 $ip:12000，請確認 PC Client 已啟動'),
+                              backgroundColor: Colors.red.shade700,
+                            ),
                           );
-                          
-                          if (streamingService.isConnected && context.mounted) {
-                            Navigator.pushNamed(context, '/stream');
-                          }
                         }
                       },
                   icon: streamingService.isConnecting
@@ -417,7 +387,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 ),
               ),
 
-              const Spacer(),
+              const SizedBox(height: 24),
 
               // Back to Discovery
               Center(

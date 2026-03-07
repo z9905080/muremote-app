@@ -39,40 +39,49 @@ class MultiTouchHandler {
 
   /**
    * 處理手指按下
+   * pointers 中的 x, y 為歸一化座標 (0-1)，需轉換為像素
    */
   async handlePointerDown(pointers) {
+    const sw = this.touchHandler.screenWidth;
+    const sh = this.touchHandler.screenHeight;
     for (const pointer of pointers) {
       const { pointerId, x, y } = pointer;
-      
+
       if (this.activePointers.size < this.maxPointers) {
         this.activePointers.set(pointerId, {
           x, y,
           startX: x,
           startY: y
         });
-        
-        // 記錄為按下狀態
-        await this.touchHandler.touchDown(x, y);
+
+        const posX = Math.round(x * sw);
+        const posY = Math.round(y * sh);
+        await this.touchHandler.touchDown(posX, posY, pointerId);
       }
     }
   }
 
   /**
    * 處理手指移動
+   * pointers 中的 x, y 為歸一化座標 (0-1)，需轉換為像素
    */
   async handlePointerMove(pointers) {
+    const sw = this.touchHandler.screenWidth;
+    const sh = this.touchHandler.screenHeight;
     for (const pointer of pointers) {
       const { pointerId, x, y } = pointer;
       const activePointer = this.activePointers.get(pointerId);
-      
+
       if (activePointer) {
-        // 計算移動距離
-        const dx = x - activePointer.x;
-        const dy = y - activePointer.y;
-        
+        // 計算移動距離（像素）
+        const dx = (x - activePointer.x) * sw;
+        const dy = (y - activePointer.y) * sh;
+
         // 移動超過閾值才觸發
         if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
-          await this.touchHandler.touchMove(x, y);
+          const posX = Math.round(x * sw);
+          const posY = Math.round(y * sh);
+          await this.touchHandler.touchMove(posX, posY, pointerId);
           activePointer.x = x;
           activePointer.y = y;
         }
@@ -82,13 +91,18 @@ class MultiTouchHandler {
 
   /**
    * 處理手指放開
+   * pointers 中的 x, y 為歸一化座標 (0-1)，需轉換為像素
    */
   async handlePointerUp(pointers) {
+    const sw = this.touchHandler.screenWidth;
+    const sh = this.touchHandler.screenHeight;
     for (const pointer of pointers) {
       const { pointerId, x, y } = pointer;
-      
+
       if (this.activePointers.has(pointerId)) {
-        await this.touchHandler.touchUp(x, y);
+        const posX = Math.round(x * sw);
+        const posY = Math.round(y * sh);
+        await this.touchHandler.touchUp(posX, posY, pointerId);
         this.activePointers.delete(pointerId);
       }
     }
